@@ -20,7 +20,8 @@
       "class": "signaldeck_ai.chat_processor.AGUIChatProcessor",
       "config": {
         "endpoint": "http://127.0.0.1:8765/ag-ui",
-        "api_token_env": "CLI_AGENT_API_TOKEN"
+        "api_token_env": "CLI_AGENT_API_TOKEN",
+        "api_token_file": "/config/cli-agent-api.token"
       }
     }
   ],
