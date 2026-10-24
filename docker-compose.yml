@@ -12,8 +12,6 @@ services:
       SIGNALDECK_COLLECT_DATA: "false"
       SIGNALDECK_DEBUG: "false"
       SIGNALDECK_DEBUG_AUTO_RELOAD: "false"
-      # Required when connecting to cli-agent-api:
-      CLI_AGENT_API_TOKEN: ${CLI_AGENT_API_TOKEN:-}
     volumes:
       - ./config:/config:ro
       - ./logs:/app/logs
