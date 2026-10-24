@@ -8,4 +8,3 @@ db/
 .venv/
 dist/
 build/
-config/*.token
