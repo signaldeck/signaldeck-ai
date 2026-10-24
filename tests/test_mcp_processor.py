@@ -89,3 +89,12 @@ def test_actions_validate_parameters_before_provider_invocation():
     with pytest.raises(Exception):
         processor.execute_action("setpoint", {"setpoint": 20, "extra": True})
     assert len(provider.calls) == count
+
+
+def test_mcp_runtime_builds_streamable_http_asgi_app():
+    from signaldeck_ai.mcp_server import MCPRuntime
+    processor, _ = make_processor()
+    runtime = MCPRuntime(processor)
+    assert runtime.url == "http://127.0.0.1:8766/mcp"
+    assert runtime.mcp.streamable_http_app() is not None
+    assert runtime.status == "pending"
