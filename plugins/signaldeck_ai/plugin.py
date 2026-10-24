@@ -27,7 +27,6 @@ def _processors(app):
 
 
 def _chat(name):
-    processor = _processors(request._get_current_object().environ["werkzeug.request"].app) if False else None
     # Active Flask app lookup, separate from the importing module's lifetime.
     from flask import current_app
     processor = _processors(current_app).get(name)
