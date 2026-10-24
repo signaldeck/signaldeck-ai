@@ -10,6 +10,7 @@
 
     const base = root.dataset.endpoint;
     const status = root.querySelector(".sdai-status");
+    const tokenField = root.querySelector(".sdai-token");
     const transcript = root.querySelector(".sdai-transcript");
     const connect = root.querySelector(".sdai-connect");
     const fresh = root.querySelector(".sdai-new");
@@ -18,7 +19,8 @@
     const approvals = root.querySelector(".sdai-approval");
     const approvalText = root.querySelector(".sdai-approval-text");
     const form = root.querySelector(".sdai-form");
-    let connected = false, busy = false, threadId = newid(), messages = [], interrupt = null;
+    let connected = false, busy = false, threadId = newid(), messages = [], interrupt = null, connectionId = null;
+    const connectionHeaders = () => ({"X-SignalDeck-AI-Connection": connectionId});
 
     function render(role, value) {
       const node = document.createElement("div");
@@ -30,6 +32,9 @@
     }
     function updateUI() {
       connect.textContent = connected ? "Trennen" : "Verbinden";
+      connect.disabled = busy;
+      tokenField.hidden = connected;
+      tokenField.disabled = connected;
       field.disabled = !connected || busy;
       send.disabled = !connected || busy;
       fresh.disabled = !connected || busy;
@@ -37,12 +42,18 @@
     }
     async function closeThread() {
       // Unsupported management endpoints may safely return an error.
-      await fetch(base + "/thread/" + encodeURIComponent(threadId), { method: "DELETE" }).catch(() => {});
+      await fetch(base + "/thread/" + encodeURIComponent(threadId), { method: "DELETE", headers: connectionHeaders() }).catch(() => {});
     }
     connect.addEventListener("click", async () => {
       if (connected) {
         if (busy) return;
+        const priorId = connectionId;
         connected = false;
+        connectionId = null;
+        void fetch(base + "/disconnect", {method:"POST",headers:{"X-SignalDeck-AI-Connection":priorId}}).catch(() => {});
+        threadId = newid();
+        messages = [];
+        transcript.replaceChildren();
         interrupt = null;
         approvals.hidden = true;
         updateUI();
@@ -50,9 +61,19 @@
       }
       status.textContent = "Verbindung wird geprüft ...";
       try {
-        const response = await fetch(base + "/capabilities");
+        const token = tokenField.value.trim();
+        if (!token) throw new Error("Bitte API-Token eingeben.");
+        const response = await fetch(base + "/connect", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({token}),
+        });
         if (!response.ok) throw new Error("HTTP " + response.status);
+        const result = await response.json();
+        connectionId = result.connection_id;
+        if (!connectionId) throw new Error("Keine Verbindungskennung erhalten");
         connected = true;
+        tokenField.value = ""; // no secret remains in the DOM after connecting
       } catch (err) {
         render("info", "Verbindung fehlgeschlagen: " + String(err));
       }
@@ -80,7 +101,7 @@
       if (resume) requestBody.resume = [resume];
       try {
         response = await fetch(base + "/run", {
-          method: "POST", headers: {"Content-Type":"application/json", "Accept":"text/event-stream"},
+          method: "POST", headers: {"Content-Type":"application/json", "Accept":"text/event-stream", ...connectionHeaders()},
           body: JSON.stringify(requestBody),
         });
         if (!response.ok || !response.body) throw new Error("HTTP " + response.status);
