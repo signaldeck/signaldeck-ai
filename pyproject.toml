@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signaldeck-ai"
+version = "0.1.0"
+description = "SignalDeck MCP and AG-UI integration"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "signaldeck-sdk>=0.6.0",
+  "flask>=3.0",
+  "mcp>=1.30,<2",
+  "uvicorn>=0.35,<1",
+  "httpx>=0.27,<1",
+  "jsonschema>=4.26,<5"
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["plugins"]
+include = ["signaldeck_ai*"]
+
+[tool.setuptools.package-data]
+signaldeck_ai = ["templates/**/*", "static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
