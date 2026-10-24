@@ -1,0 +1,34 @@
+{
+  "page_title": "SignalDeck AI",
+  "i18n": {"lang": "de", "lang_fallback": "en"},
+  "processors": [
+    {
+      "name": "mcp_climate",
+      "class": "signaldeck_ai.mcp_processor.MCPServerProcessor",
+      "config": {
+        "mcp": {
+          "name": "signaldeck-climate",
+          "host": "127.0.0.1",
+          "port": 8766
+        },
+        "values": [],
+        "methods": []
+      }
+    },
+    {
+      "name": "agui",
+      "class": "signaldeck_ai.chat_processor.AGUIChatProcessor",
+      "config": {
+        "endpoint": "http://127.0.0.1:8765/ag-ui",
+        "api_token_env": "CLI_AGENT_API_TOKEN"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "AI",
+      "data": "/config/group_ai.json"
+    }
+  ],
+  "cmd": {"alias": [], "script": []}
+}
