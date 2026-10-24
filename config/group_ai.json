@@ -1,0 +1,16 @@
+[
+  {
+    "name": "MCP-Server",
+    "element": "MCP Climate",
+    "type": "mcp_climate",
+    "fa": "fas fa-server",
+    "value": ["overview"]
+  },
+  {
+    "name": "Agenten-Chat",
+    "element": "AG-UI Chat",
+    "type": "agui",
+    "fa": "fas fa-comments",
+    "value": ["chat"]
+  }
+]
