@@ -26,9 +26,12 @@ isolation, and MCP must not be exposed to untrusted networks.
    DisplayProcessor remains unconnected.
 2. Configure cli-agent's Streamable HTTP MCP server to
    `http://127.0.0.1:8766/mcp` and start `cli-agent-api`.
-3. Put the bearer token printed by cli-agent-api into the environment
-   variable `CLI_AGENT_API_TOKEN` used by Docker Compose (restart
-   SignalDeck to refresh its process environment).
+3. Write the bearer token printed by cli-agent-api to the host-side
+   file `config/cli-agent-api.token`, with restrictive permissions, for
+   example `chmod 600 config/cli-agent-api.token`. The already-running
+   SignalDeck container sees the file through the `/config` bind mount;
+   no restart is required. Alternatively use `CLI_AGENT_API_TOKEN`
+   provided at container creation time.
 4. Click **Verbinden** in the SignalDeck chat panel.
 
 Example cli-agent config:
@@ -129,8 +132,9 @@ different discovery and cleanup behavior.
 
 ### Security
 
-The cli-agent bearer token is read from a server-side environment
-variable and never exposed to browser JS. The SignalDeck proxy permits
+The cli-agent bearer token is read from a server-side token file at
+request time (or from an environment variable as fallback) and is never
+exposed to browser JS. The token file must remain untracked and private. The SignalDeck proxy permits
 configured loopback endpoints only. Browser state-changing requests
 check same-origin `Origin` headers (CSRF defense, **not user login**).
 You must separately secure the SignalDeck web application: otherwise
