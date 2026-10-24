@@ -1,0 +1,9 @@
+<div class="state-container">
+  <div class="state-row"><div class="state-label">MCP-Server</div><div class="state-value">{{ displayData.name }}</div></div>
+  <div class="state-row"><div class="state-label">Status</div><div class="state-value">{{ displayData.status }}</div></div>
+  <div class="state-row"><div class="state-label">Adresse</div><div class="state-value">{{ displayData.url }}</div></div>
+  <div class="state-row"><div class="state-label">Tools</div><div class="state-value">{{ displayData.tools|length }}</div></div>
+  {% for tool in displayData.tools %}
+  <div class="state-row"><div class="state-label">{{ tool.name }}</div><div class="state-value">{{ tool.description }}</div></div>
+  {% endfor %}
+</div>
