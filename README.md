@@ -26,13 +26,11 @@ isolation, and MCP must not be exposed to untrusted networks.
    DisplayProcessor remains unconnected.
 2. Configure cli-agent's Streamable HTTP MCP server to
    `http://127.0.0.1:8766/mcp` and start `cli-agent-api`.
-3. Write the bearer token printed by cli-agent-api to the host-side
-   file `config/cli-agent-api.token`, with restrictive permissions, for
-   example `chmod 600 config/cli-agent-api.token`. The already-running
-   SignalDeck container sees the file through the `/config` bind mount;
-   no restart is required. Alternatively use `CLI_AGENT_API_TOKEN`
-   provided at container creation time.
-4. Click **Verbinden** in the SignalDeck chat panel.
+3. Open SignalDeck's Chat DisplayProcessor, enter the bearer token printed
+   by `cli-agent-api` into the password field, then click **Verbinden**.
+   SignalDeck requires no restart or token configuration file.
+4. Use the chat; clicking **Trennen** clears the server-side token and closes
+   the associated agent threads.
 
 Example cli-agent config:
 
@@ -132,9 +130,13 @@ different discovery and cleanup behavior.
 
 ### Security
 
-The cli-agent bearer token is read from a server-side token file at
-request time (or from an environment variable as fallback) and is never
-exposed to browser JS. The token file must remain untracked and private. The SignalDeck proxy permits
+The cli-agent bearer token is provided in the SignalDeck Chat UI at connection
+time and kept only in server-side process memory until disconnect or idle
+expiration (30 minutes). The UI clears the password field after connection
+and keeps only an opaque connection handle in JavaScript memory; neither token
+nor handle is stored in browser storage or DisplayData. Avoid placing
+SignalDeck behind an untrusted HTTP proxy, because the initial token entry
+travels through SignalDeck's HTTP endpoint. The SignalDeck proxy permits
 configured loopback endpoints only. Browser state-changing requests
 check same-origin `Origin` headers (CSRF defense, **not user login**).
 You must separately secure the SignalDeck web application: otherwise
