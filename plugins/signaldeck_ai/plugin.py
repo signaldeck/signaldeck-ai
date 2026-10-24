@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from urllib.parse import urlsplit, quote
 
 import httpx
@@ -45,7 +46,14 @@ def _same_origin():
 
 
 def _auth(processor):
-    token = os.environ.get(processor.api_token_env, "")
+    token = ""
+    if processor.api_token_file:
+        try:
+            token = Path(processor.api_token_file).read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            pass
+    if not token:
+        token = os.environ.get(processor.api_token_env, "").strip()
     if not token:
         raise RuntimeError(f"Missing API token environment variable: {processor.api_token_env}")
     return {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
