@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
-from urllib.parse import urlsplit, quote
+from urllib.parse import quote
 
 import httpx
 from flask import Blueprint, Response, abort, jsonify, request, stream_with_context
@@ -45,32 +43,88 @@ def _same_origin():
     return origin == expected
 
 
-def _auth(processor):
-    token = ""
-    if processor.api_token_file:
+def _auth(connection):
+    return {
+        "Authorization": f"Bearer {connection.token}",
+        "Accept": "text/event-stream",
+    }
+
+
+def _connection(processor):
+    connection_id = request.headers.get("X-SignalDeck-AI-Connection", "")
+    if not connection_id:
+        abort(401)
+    connection = processor.connection(connection_id)
+    if connection is None:
+        abort(401)
+    return connection
+
+
+@bp.post("/api/chat/<name>/connect")
+def connect(name):
+    if not _same_origin():
+        return jsonify(error="Same-origin request required"), 403
+    processor = _chat(name)
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {"token"}:
+        return jsonify(error="Token required"), 400
+    token = data["token"]
+    if not isinstance(token, str) or not 1 <= len(token) <= 4096:
+        return jsonify(error="Invalid token"), 400
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            response = client.get(
+                processor.endpoint.removesuffix("/ag-ui") + "/ag-ui/capabilities",
+                headers=headers,
+            )
+        if response.status_code in {401, 403}:
+            return jsonify(error="Token rejected by agent"), 401
+        response.raise_for_status()
+        response.json()
+        connection_id = processor.connect(token)
+        return jsonify(connection_id=connection_id), 200
+    except (httpx.HTTPError, ValueError, RuntimeError):
+        return jsonify(error="Agent unavailable or connection limit reached"), 502
+
+
+@bp.post("/api/chat/<name>/disconnect")
+def disconnect(name):
+    if not _same_origin():
+        return jsonify(error="Same-origin request required"), 403
+    processor = _chat(name)
+    connection_id = request.headers.get("X-SignalDeck-AI-Connection", "")
+    connection = processor.disconnect(connection_id)
+    if connection is None:
+        return jsonify(error="Connection not found"), 401
+    # Do not allow a stale session to keep its backend threads indefinitely.
+    for thread_id in tuple(connection.threads):
         try:
-            token = Path(processor.api_token_file).read_text(encoding="utf-8").strip()
-        except FileNotFoundError:
+            with httpx.Client(timeout=5.0) as client:
+                client.delete(
+                    processor.endpoint.removesuffix("/ag-ui") + "/threads/" +
+                    quote(thread_id, safe=""),
+                    headers=_auth(connection),
+                )
+        except httpx.HTTPError:
             pass
-    if not token:
-        token = os.environ.get(processor.api_token_env, "").strip()
-    if not token:
-        raise RuntimeError(f"Missing API token environment variable: {processor.api_token_env}")
-    return {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
+    return ("", 204)
 
 
 @bp.get("/api/chat/<name>/capabilities")
 def capabilities(name):
     processor = _chat(name)
+    connection = _connection(processor)
     try:
-        headers = _auth(processor)
-        with httpx.Client(timeout=httpx.Timeout(8.0)) as client:
-            response = client.get(processor.endpoint.rsplit("/ag-ui", 1)[0] + "/ag-ui/capabilities", headers=headers)
+        with httpx.Client(timeout=8.0) as client:
+            response = client.get(
+                processor.endpoint.removesuffix("/ag-ui") + "/ag-ui/capabilities",
+                headers=_auth(connection),
+            )
             response.raise_for_status()
-            result = response.json()
-        return jsonify(result)
-    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
-        return jsonify(error=f"Cannot connect to AG-UI agent: {type(exc).__name__}"), 502
+            return jsonify(response.json())
+    except (httpx.HTTPError, ValueError):
+        return jsonify(error="Agent unavailable"), 502
 
 
 @bp.post("/api/chat/<name>/run")
@@ -87,10 +141,11 @@ def run(name):
         return jsonify(error="AG-UI threadId/runId required"), 400
     if not isinstance(data.get("messages"), list):
         return jsonify(error="AG-UI messages required"), 400
-    try:
-        headers = _auth(processor)
-    except RuntimeError:
-        return jsonify(error="AG-UI backend is not configured"), 503
+    connection_id = request.headers.get("X-SignalDeck-AI-Connection", "")
+    connection = processor.claim_thread(connection_id, data["threadId"])
+    if connection is None:
+        return jsonify(error="Not connected or thread belongs to another connection"), 403
+    headers = _auth(connection)
     headers["Content-Type"] = "application/json"
 
     def events():
@@ -125,8 +180,12 @@ def delete_thread(name, thread_id):
     processor = _chat(name)
     if not thread_id or len(thread_id) > 128:
         return jsonify(error="Invalid thread ID"), 400
+    connection_id = request.headers.get("X-SignalDeck-AI-Connection", "")
+    if not processor.owns_thread(connection_id, thread_id):
+        return jsonify(error="Thread not owned by connection"), 403
+    connection = processor.connection(connection_id)
+    headers = _auth(connection)
     try:
-        headers = _auth(processor)
         base = processor.endpoint.rsplit("/ag-ui", 1)[0]
         with httpx.Client(timeout=8.0) as client:
             response = client.delete(
@@ -134,8 +193,9 @@ def delete_thread(name, thread_id):
             )
         if response.status_code not in {204, 404}:
             return jsonify(error="Cannot close thread"), 502
+        processor.release_thread(connection_id, thread_id)
         return ("", 204)
-    except (httpx.HTTPError, RuntimeError):
+    except httpx.HTTPError:
         return jsonify(error="Cannot close thread"), 502
 
 
