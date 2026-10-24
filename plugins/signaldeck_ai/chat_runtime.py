@@ -252,7 +252,7 @@ class ChatRuntime:
                         self._receive_frame(connection, run, lines)
             if not run.done:
                 run.emit({"type": "RUN_ERROR", "message": "AG-UI-Stream unerwartet beendet."})
-        except (httpx.HTTPError, ValueError, TypeError, KeyError, ChatActionError):
+        except Exception:
             if not run.done and not connection.revoked:
                 run.emit({"type": "RUN_ERROR", "message": "AG-UI-Agentenlauf fehlgeschlagen."})
         finally:
@@ -276,7 +276,6 @@ class ChatRuntime:
             event = json.loads("\n".join(lines))
             if not isinstance(event, dict) or not isinstance(event.get("type"), str):
                 raise ValueError("Malformed AG-UI event")
-            run.emit(event)
             if event.get("type") == "RUN_FINISHED":
                 outcome = event.get("outcome") or {}
                 if outcome.get("type") == "interrupt":
@@ -284,6 +283,7 @@ class ChatRuntime:
                     with self._lock:
                         if not connection.revoked and connection.current_run == run.run_id:
                             connection.pending_interrupt = interrupts[0] if interrupts else None
+            run.emit(event)
         except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
             raise ChatActionError("Ungültiges AG-UI-Event.") from exc
 
