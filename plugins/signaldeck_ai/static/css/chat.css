@@ -10,3 +10,5 @@
 .sdai-input{flex:1;min-width:80px}
 .sdai-approval{border:1px solid #b98822;padding:10px;margin-top:10px;border-radius:6px}
 .sdai-approval button{margin-right:6px}
+
+.sdai-auth{margin-bottom:10px}.sdai-token{min-width:18rem;width:min(100%,32rem);display:block;margin-top:3px}
