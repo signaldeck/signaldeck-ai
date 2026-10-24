@@ -30,6 +30,7 @@ class AGUIChatProcessor(DisplayProcessor):
             raise ValueError("AG-UI endpoint requires a TCP port")
         self.endpoint = endpoint if parsed.path == "/ag-ui" else endpoint + "/ag-ui"
         self.api_token_env = str(config.get("api_token_env", "CLI_AGENT_API_TOKEN"))
+        self.api_token_file = str(config.get("api_token_file") or "").strip()
         if not self.api_token_env.isidentifier():
             raise ValueError("api_token_env must be an environment variable name")
 
