@@ -119,14 +119,23 @@ value/method allowlist. Each instance publishes its own
 
 ## AG-UI
 
-`AGUIChatProcessor` is a general HTTP/SSE AG-UI 1.0 client, not a
-cli-agent-specific adapter. The Flask proxy forwards standard
-`RunAgentInput`, returns SSE events and handles approval
-interrupt/resume. The client connects manually after startup.
-The cli-agent-specific `GET /ag-ui/capabilities` health/discovery URL
-and `DELETE /threads/{threadId}` lifecycle URL are optional
-conventions; a broader AG-UI interoperability layer may need
-different discovery and cleanup behavior.
+`AGUIChatProcessor` integrates the generic AG-UI 1.0 HTTP/SSE transport with
+SignalDeck's existing action system. The browser sends `connect`, `send`,
+`approve`, `new_chat` and `disconnect` as normal SignalDeck `/run` actions,
+dispatched through `AGUIChatProcessor.process()` and `performActions()`.
+A background worker sends standard `RunAgentInput` requests to the agent.
+**Only** server-to-browser SSE events have a separate, read-only route at
+`GET /plugin/ai/api/chat/<processor>/events/<run_id>`; the browser sends its
+opaque connection handle in the `X-SignalDeck-AI-Connection` header.
+The client connects manually after startup. Because SignalDeck's inherited
+`DisplayProcessor.process()` would rerender the chat element (destroying the
+live event stream), this processor overrides `process()` solely to return
+JSON action acknowledgments while leaving the DOM intact.
+
+The cli-agent-specific `GET /ag-ui/capabilities` discovery URL and
+`DELETE /threads/{threadId}` lifecycle URL are presently used for connection
+validation and cleanup. Other AG-UI servers may need different discovery and
+cleanup mechanisms.
 
 ### Security
 
@@ -137,16 +146,24 @@ and keeps only an opaque connection handle in JavaScript memory; neither token
 nor handle is stored in browser storage or DisplayData. Avoid placing
 SignalDeck behind an untrusted HTTP proxy, because the initial token entry
 travels through SignalDeck's HTTP endpoint. The SignalDeck proxy permits
-configured loopback endpoints only. Browser state-changing requests
-check same-origin `Origin` headers (CSRF defense, **not user login**).
+configured loopback endpoints only. All browser state-changing requests use SignalDeck's `/run` action dispatcher;
+the chat processor requires **POST** with a same-origin `Origin` header.
+The existing core `/run` endpoint also accepts GET for other processors,
+but AG-UI chat actions explicitly reject GET. This is CSRF mitigation,
+**not user authentication**.
 You must separately secure the SignalDeck web application: otherwise
 any web user could request AI actions under the configured agent's
 permissions. Do not expose an unauthenticated MCP endpoint outside
 loopback. Docker host mode shares the host network namespace.
 
 The first browser UI supports textual messages, tool-status events,
-and a single approval interrupt. Frontend-provided AG-UI tools,
-multi-interrupt and multimodal handling are not implemented yet.
+and a single approval interrupt. Runs execute on worker threads and bounded
+SSE replays keep the SignalDeck `/run` handler responsive. The browser
+never receives the agent API token, but does receive a temporary opaque
+connection handle held only in its in-page JavaScript state. Credentials
+expire from server memory after 30 minutes of inactivity or on disconnect.
+Frontend-provided AG-UI tools, multi-interrupt and multimodal handling are
+not implemented yet.
 
 ## Tests and status
 
