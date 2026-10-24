@@ -9,6 +9,10 @@ from signaldeck_ai.mcp_processor import MCPServerProcessor
 class Provider:
     def __init__(self):
         self.calls = []
+        self.methods = {
+            "history_export": (None, lambda *args, **kwargs: None),
+            "action_export": (None, lambda *args, **kwargs: None),
+        }
     def registerProcessor(self, processor, export):
         pass
     def getValue(self, name, refresh=True):
