@@ -66,6 +66,17 @@
 
     function liveToolStart(runId, callId, name) {
       if (!callId) return;
+      // An approval interrupt can resume the SAME tool in a new AG-UI run.
+      // Update its existing item rather than briefly rendering it twice.
+      for (const previous of toolGroups.values()) {
+        const match = Array.from(previous.list.children).find(
+          node => node.dataset.callId === callId
+        );
+        if (match) {
+          match.querySelector(".sdai-tool-status").textContent = statusText.running;
+          return;
+        }
+      }
       let group = toolGroups.get(runId);
       if (!group) {
         const details = document.createElement("details");
