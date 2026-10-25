@@ -46,8 +46,7 @@ The integration tests under `tests/test_demo_config.py` use the **real** DummyDa
 3. Open SignalDeck's Chat DisplayProcessor, enter the bearer token printed
    by `cli-agent-api` into the password field, then click **Verbinden**.
    SignalDeck requires no restart or token configuration file.
-4. Use the chat; clicking **Trennen** clears the server-side token and closes
-   the associated agent threads.
+4. Use the chat; **Verlauf zurücksetzen** discards the conversation and\n   outstanding approvals, starts a fresh agent thread and keeps the token\n   connection active. A confirmation is required. The former thread is\n   deleted from cli-agent on a best-effort basis. **Trennen** additionally\n   clears the server-side token and closes the associated agent threads.
 
 Example cli-agent config:
 
@@ -206,7 +205,7 @@ verändert ausschließlich Dummy-Werte.
 
 `AGUIChatProcessor` integrates the generic AG-UI 1.0 HTTP/SSE transport with
 SignalDeck's existing action system. The browser sends `connect`, `send`,
-`approve`, `new_chat` and `disconnect` as normal SignalDeck `/run` actions,
+`approve`, `reset_history` (`new_chat` remains a compatibility alias) and `disconnect` as normal SignalDeck `/run` actions,
 dispatched through `AGUIChatProcessor.process()` and `performActions()`.
 A background worker sends standard `RunAgentInput` requests to the agent.
 **Only** server-to-browser SSE events have a separate, read-only route at
