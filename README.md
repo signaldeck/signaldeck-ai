@@ -632,3 +632,26 @@ the persisted readings. Some synthetic/demo processors do not implement
 timestamped cache data; scalar responses from those processors are ignored
 for the optional merge. Neither `date` nor `days` of the normal daily
 history query is changed.
+
+
+## Einklappbare Tool-Aktivitäten im AG-UI-Chat
+
+Die Chatansicht sammelt alle vom cli-agent bereits gesendeten
+`TOOL_CALL_START`- und `TOOL_CALL_RESULT`-Ereignisse in einer
+**einklappbaren Übersicht pro Agentenlauf**. Das gilt ausdrücklich
+auch für automatisch freigegebene MCP-Tools; neue AG-UI-Events oder
+Änderungen an cli-agent sind nicht erforderlich.
+
+Die Anzeige verwendet nur **Toolname und Ausführungsstatus**.
+Fehlende Argumente werden weder angefordert noch angezeigt.
+Die MCP-Rückgabewerte erscheinen ebenfalls nicht in dieser Übersicht.
+Eine unterbrochene Freigabe und deren Fortsetzung aktualisieren
+denselben Tool-Eintrag statt ihn zu verdoppeln.
+
+Die Übersicht wird nur in der **serverseitigen Darstellungs-Historie**
+gespeichert, getrennt von den Nachrichten für cli-agent. Deshalb
+bleiben die Aufrufe nach Seitenwechseln und automatischer Synchronisierung
+sichtbar, ohne den LLM-Kontext zu vergrößern. Sie werden mit
+**Verlauf zurücksetzen** gelöscht. Die Anzahl der im Speicher
+verfolgten Tool-Aufrufe pro Chat ist auf 1024 begrenzt; bei einem
+SignalDeck-Neustart geht die In-Memory-Darstellungs-Historie verloren.
