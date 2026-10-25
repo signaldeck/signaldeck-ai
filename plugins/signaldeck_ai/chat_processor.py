@@ -84,9 +84,12 @@ class AGUIChatProcessor(DisplayProcessor):
             return {"run_id": self.runtime.approve(
                 identifier, kwargs.get("interrupt_id"), kwargs.get("decision"),
             )}
-        if action == "new_chat":
+        if action in {"reset_history", "new_chat"}:
+            # Keep the authenticated connection, but start a fresh thread
+            # with no previous messages, tool approvals or SSE run events.
+            # "new_chat" remains an alias for already loaded browser clients.
             self.runtime.new_chat(identifier)
-            return {}
+            return {"history_reset": True}
         if action == "disconnect":
             self.runtime.disconnect(identifier)
             return {}
