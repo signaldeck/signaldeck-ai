@@ -44,7 +44,7 @@ def test_catalog_is_actual_registered_mcp_tool_schema(console_processor):
     history_description = tools["get_history"]["description"]
     assert "AGGREGATE STATISTICS" in history_description
     assert "ALL measurements" in history_description
-    assert "inclusive END date" in history_description
+    assert "inclusive START date" in history_description
     assert "date" in tools["get_history"]["input_schema"]["required"]
     props = tools["get_history"]["input_schema"]["properties"]
     assert "aggregate statistics" in props["include_points"]["description"]
