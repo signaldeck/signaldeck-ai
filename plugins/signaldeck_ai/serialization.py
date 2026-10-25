@@ -137,6 +137,30 @@ def series_points(
     return [{"time": stamp, "value": json_safe(value), "time_inferred": True}]
 
 
+
+def merge_history_points(
+    persisted: list[dict[str, Any]],
+    cached: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge timestamped samples without double-counting an overlapping sample.
+
+    At an identical instant the RAM-cache sample wins over the persisted one:
+    it may be more recent than the last database write. Offset-aware instants
+    are compared in UTC; naive timestamps remain naive and are *not* assigned
+    an invented timezone.
+    """
+    def key(point: dict[str, Any]) -> tuple[str, str]:
+        stamp = datetime.fromisoformat(point["time"])
+        if stamp.tzinfo is not None and stamp.utcoffset() is not None:
+            return ("aware", stamp.astimezone(timezone.utc).isoformat())
+        return ("naive", stamp.isoformat())
+
+    merged = {key(point): point for point in persisted}
+    merged.update((key(point), point) for point in cached)
+    # Preserve the existing output ordering and source timestamps.
+    return sorted(merged.values(), key=lambda point: point["time"])
+
+
 def summarize_points(points: list[dict[str, Any]]) -> dict[str, Any]:
     numeric = [
         p["value"] for p in points
