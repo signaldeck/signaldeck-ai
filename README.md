@@ -589,6 +589,33 @@ the individual `max_days` limits. Scalar historical results are marked
 `time_inferred` with the requested calendar day rather than the current
 time. Previously saved requests containing only `days` need a `date`.
 
+### Point-in-time historical lookup
+
+Use `get_historical_value` when you need **one** historical value instead of
+all samples for a calendar day. The `date` parameter MUST contain both date
+and local time, including seconds: `YYYY-MM-DDTHH:MM:SS`. A date without a
+time or a timezone-offset string is rejected.
+
+```json
+{"name": "pv_power_history", "date": "2026-10-20T14:30:00"}
+```
+
+This uses SignalDeck's existing `hist(date=..., days=0, fullDay=False)`.
+It returns the **best matching value chosen by the configured datastore**;
+it does not promise that the measurement was recorded at exactly 14:30:00.
+The response contains `requested_time`, `value`, the configured
+description and optional unit, not a full series or daily statistics.
+
+`get_history` remains unchanged for full calendar-day time series, including
+its explicit start date, optional multi-day window, points/statistics and
+today's optional cache merge. Both tools share the same explicit
+`mcp_data.data_rows` allowlist. Custom `mode="range"` history providers
+are not eligible for a single-value lookup.
+
+The MCP diagnostic console shows only FastMCP's structured tool result,
+instead of also showing a second escaped JSON copy from its text blocks.
+The external MCP response consumed by cli-agent is not changed.
+
 ### In-memory measurements on the current day
 
 For a requested date window that includes **today**, `get_history`
