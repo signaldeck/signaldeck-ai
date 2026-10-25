@@ -293,6 +293,11 @@
           "timeout_seconds": 120
         }
       }
+    },
+    {
+      "name": "script",
+      "class": "signaldeck_plugin_main.processors.script.script_processor.ScriptProcessor",
+      "config": {}
     }
   ],
   "groups": [
@@ -321,6 +326,19 @@
             "name": "stufe",
             "type": "str",
             "default": "warm"
+          }
+        ]
+      },
+      {
+        "name": "demo_llm",
+        "commands": [
+          "LLM $prompt$"
+        ],
+        "variables": [
+          {
+            "name": "prompt",
+            "type": "str",
+            "default": "Wie ist die aktuelle Temperatur im Garten?"
           }
         ]
       }
