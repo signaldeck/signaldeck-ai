@@ -1,25 +1,192 @@
 {
-  "page_title": "SignalDeck AI",
+  "page_title": "SignalDeck AI – Demo",
   "i18n": {
     "lang": "de",
     "lang_fallback": "en"
   },
   "processors": [
     {
+      "name": "dummy_temperature",
+      "class": "signaldeck_plugin_main.processors.dummy_data.data.Data",
+      "config": {
+        "vars": {
+          "float": [
+            "temp_garten",
+            "temp_wohnzimmer",
+            "temp_keller"
+          ]
+        },
+        "defaults": {
+          "temp_garten": 18.5,
+          "temp_wohnzimmer": 21.3,
+          "temp_keller": 17.8
+        },
+        "hist": {
+          "temp_garten": {
+            "type": "asc",
+            "perDay": 0.35
+          },
+          "temp_wohnzimmer": {
+            "type": "desc",
+            "perDay": 0.08
+          },
+          "temp_keller": {
+            "type": "asc",
+            "perDay": 0.03
+          }
+        },
+        "export": {
+          "values": [
+            {
+              "temperature_garten": "temp_garten"
+            },
+            {
+              "temperature_wohnzimmer": "temp_wohnzimmer"
+            },
+            {
+              "temperature_keller": "temp_keller"
+            }
+          ],
+          "methods": [
+            {
+              "name": "hist_temperature_garten",
+              "target_function": "hist",
+              "args": [
+                "temp_garten"
+              ]
+            },
+            {
+              "name": "hist_temperature_wohnzimmer",
+              "target_function": "hist",
+              "args": [
+                "temp_wohnzimmer"
+              ]
+            },
+            {
+              "name": "hist_temperature_keller",
+              "target_function": "hist",
+              "args": [
+                "temp_keller"
+              ]
+            },
+            {
+              "name": "set_mock_temp_garten",
+              "target_function": "performActions",
+              "args": [
+                [
+                  "demo"
+                ],
+                "mcp-mock"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "mcp_climate",
       "class": "signaldeck_ai.mcp_processor.MCPServerProcessor",
       "config": {
         "mcp": {
-          "name": "signaldeck-climate",
+          "name": "signaldeck-climate-demo",
           "host": "127.0.0.1",
           "port": 8766,
-          "instructions": "Dieser Server stellt Messwerte und historische Zeitreihen von SignalDeck bereit. Verwende get_values für aktuelle Werte und get_history für Zeitverläufe. Frage nur die benötigten Werte ab."
+          "instructions": "Dieser MCP-Server liefert ausschließlich simulierte Temperaturwerte aus SignalDeck. get_values liest aktuelle Werte, get_history liefert synthetische tägliche historische Werte. Mit execute_action darf nur die simulierte Gartentemperatur verändert werden; echte Geräte sind nicht angebunden. Frage nur benötigte Felder ab."
         },
-        "values": [],
-        "methods": [],
+        "values": [
+          {
+            "name": "temp_garten",
+            "type": "field",
+            "from": "temperature_garten"
+          },
+          {
+            "name": "temp_wohnzimmer",
+            "type": "field",
+            "from": "temperature_wohnzimmer"
+          },
+          {
+            "name": "temp_keller",
+            "type": "field",
+            "from": "temperature_keller"
+          }
+        ],
+        "methods": [
+          {
+            "name": "hist_temp_garten",
+            "from": "hist_temperature_garten"
+          },
+          {
+            "name": "hist_temp_wohnzimmer",
+            "from": "hist_temperature_wohnzimmer"
+          },
+          {
+            "name": "hist_temp_keller",
+            "from": "hist_temperature_keller"
+          },
+          {
+            "name": "set_temp_garten",
+            "from": "set_mock_temp_garten"
+          }
+        ],
         "mcp_data": {
-          "values": [],
-          "data_rows": []
+          "values": [
+            {
+              "field": "temp_garten",
+              "description": "Aktuelle simulierte Temperatur im Garten",
+              "unit": "°C"
+            },
+            {
+              "field": "temp_wohnzimmer",
+              "description": "Aktuelle simulierte Temperatur im Wohnzimmer",
+              "unit": "°C"
+            },
+            {
+              "field": "temp_keller",
+              "description": "Aktuelle simulierte Temperatur im Keller",
+              "unit": "°C"
+            }
+          ],
+          "data_rows": [
+            {
+              "func": "hist_temp_garten",
+              "description": "Simulierter täglicher Temperaturverlauf im Garten",
+              "unit": "°C",
+              "max_days": 30
+            },
+            {
+              "func": "hist_temp_wohnzimmer",
+              "description": "Simulierter täglicher Temperaturverlauf im Wohnzimmer",
+              "unit": "°C",
+              "max_days": 30
+            },
+            {
+              "func": "hist_temp_keller",
+              "description": "Simulierter täglicher Temperaturverlauf im Keller",
+              "unit": "°C",
+              "max_days": 30
+            }
+          ],
+          "actions": [
+            {
+              "func": "set_temp_garten",
+              "description": "Ausschließlich den Dummy-Wert für die Gartentemperatur verändern (keine echte Haussteuerung).",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "temp_garten": {
+                    "type": "number",
+                    "minimum": -30,
+                    "maximum": 55,
+                    "description": "Simulierte Temperatur in Grad Celsius"
+                  }
+                },
+                "required": [
+                  "temp_garten"
+                ],
+                "additionalProperties": false
+              }
+            }
+          ]
         }
       }
     },
@@ -33,7 +200,7 @@
   ],
   "groups": [
     {
-      "name": "AI",
+      "name": "AI-Demo",
       "data": "/config/group_ai.json"
     }
   ],
