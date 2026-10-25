@@ -12,7 +12,8 @@
         "mcp": {
           "name": "signaldeck-climate",
           "host": "127.0.0.1",
-          "port": 8766
+          "port": 8766,
+          "instructions": "Dieser Server stellt Messwerte und historische Zeitreihen von SignalDeck bereit. Verwende get_values für aktuelle Werte und get_history für Zeitverläufe. Frage nur die benötigten Werte ab."
         },
         "values": [],
         "methods": [],
