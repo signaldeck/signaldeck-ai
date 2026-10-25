@@ -38,7 +38,7 @@ def invoke(processor, **params):
 def test_catalog_is_actual_registered_mcp_tool_schema(console_processor):
     processor, _ = console_processor
     tools = {t["name"]: t for t in processor.registered_tool_catalog()}
-    assert set(tools) == {"get_values", "get_history", "execute_action", "run"}
+    assert set(tools) == {"get_values", "get_history", "get_historical_value", "execute_action", "run"}
     assert "fields" in tools["get_values"]["input_schema"]["properties"]
     assert "name" in tools["get_history"]["input_schema"]["properties"]
     history_description = tools["get_history"]["description"]
@@ -46,6 +46,7 @@ def test_catalog_is_actual_registered_mcp_tool_schema(console_processor):
     assert "ALL measurements" in history_description
     assert "inclusive START date" in history_description
     assert "date" in tools["get_history"]["input_schema"]["required"]
+    assert set(tools["get_historical_value"]["input_schema"]["required"]) == {"name", "date"}
     props = tools["get_history"]["input_schema"]["properties"]
     assert "aggregate statistics" in props["include_points"]["description"]
     assert "No individual points" in props["include_points"]["description"]
@@ -144,3 +145,43 @@ def test_view_renders_registered_tool_details(console_processor):
     assert "get_history" in html
     assert "execute_action" in html
     assert "Schreibaktion" in html
+
+
+def test_point_lookup_tool_requires_full_timestamp_and_returns_one_value(console_processor):
+    processor, _ = console_processor
+    result = invoke(
+        processor, tool_name="get_historical_value",
+        arguments=json.dumps({
+            "name": "hist_temp_garten",
+            "date": "2026-10-20T14:30:00",
+        }),
+    )
+    assert result["ok"], result
+    structured = result["result"]
+    assert isinstance(structured, dict), structured
+    assert "2026-10-20T14:30:00" in json.dumps(structured)
+
+    for invalid in ["2026-10-20", "2026-10-20T14:30", "2026-10-20T99:30:00"]:
+        rejected = invoke(
+            processor, tool_name="get_historical_value",
+            arguments=json.dumps({"name": "hist_temp_garten", "date": invalid}),
+        )
+        assert rejected["ok"] is False, (invalid, rejected)
+
+
+def test_diagnostic_tools_use_structured_response_not_duplicate_text(console_processor):
+    processor, _ = console_processor
+    for tool_name, arguments in [
+        ("get_values", {"fields": ["temp_garten"]}),
+        ("get_history", {"name": "hist_temp_garten", "date": "2026-10-20",
+                         "days": 1, "include_points": True}),
+        ("get_historical_value", {"name": "hist_temp_garten",
+                                  "date": "2026-10-20T14:30:00"}),
+    ]:
+        result = invoke(
+            processor, tool_name=tool_name,
+            arguments=json.dumps(arguments),
+        )
+        assert result["ok"], result
+        # Previously this was a two-item list: [text content blocks, dict].
+        assert isinstance(result["result"], dict), result
