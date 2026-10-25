@@ -12,3 +12,11 @@
 .sdai-approval button{margin-right:6px}
 
 .sdai-auth{margin-bottom:10px}.sdai-token{min-width:18rem;width:min(100%,32rem);display:block;margin-top:3px}
+
+.sdai-tool-group{border:1px solid var(--border-color,#9997);border-radius:7px;padding:6px 10px;background:#8881;font-size:.87em}
+.sdai-tool-group summary{cursor:pointer;font-weight:600;user-select:none}
+.sdai-tool-group summary:focus-visible{outline:2px solid var(--border-color,#777);outline-offset:3px}
+.sdai-tool-list{list-style:none;margin:8px 0 2px;padding:0;display:flex;flex-direction:column;gap:5px}
+.sdai-tool-entry{display:flex;align-items:baseline;justify-content:space-between;gap:12px;border-top:1px solid #9993;padding:6px 0 0;min-width:0}
+.sdai-tool-name{overflow-wrap:anywhere;min-width:0;font-family:monospace}
+.sdai-tool-status{white-space:nowrap;color:var(--text-muted,#777)}
