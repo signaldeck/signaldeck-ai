@@ -41,6 +41,15 @@ def test_catalog_is_actual_registered_mcp_tool_schema(console_processor):
     assert set(tools) == {"get_values", "get_history", "execute_action"}
     assert "fields" in tools["get_values"]["input_schema"]["properties"]
     assert "name" in tools["get_history"]["input_schema"]["properties"]
+    history_description = tools["get_history"]["description"]
+    assert "AGGREGATE STATISTICS" in history_description
+    assert "ALL measurements" in history_description
+    assert "now minus N days" in history_description
+    props = tools["get_history"]["input_schema"]["properties"]
+    assert "aggregate statistics" in props["include_points"]["description"]
+    assert "No individual points" in props["include_points"]["description"]
+    assert "evenly sampled" in props["max_points"]["description"]
+
     assert tools["execute_action"]["is_action"] is True
     assert "Aktuelle" in tools["get_values"]["description"] or "simulierte" in tools["get_values"]["description"]
 
