@@ -252,6 +252,32 @@
                 ],
                 "additionalProperties": false
               }
+            },
+            {
+              "name": "Nachricht",
+              "description": "Gibt einen frei formulierten kurzen Testtext auf dem Server aus (nur Echo; keine echte Socket.IO-Nachricht).",
+              "command": "echo",
+              "args": [
+                "MCP_Nachricht",
+                {
+                  "param": "msg"
+                }
+              ],
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "msg": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Freier druckbarer Testtext bis 500 Zeichen; keine Zeilenumbrüche oder Steuerzeichen."
+                  }
+                },
+                "required": [
+                  "msg"
+                ],
+                "additionalProperties": false
+              }
             }
           ]
         }
