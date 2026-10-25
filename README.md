@@ -57,6 +57,66 @@ transport = "streamable_http"
 url = "http://127.0.0.1:8766/mcp"
 ```
 
+## Optional one-shot LLM Cmd
+
+Each `AGUIChatProcessor` can register a separate SignalDeck command.
+The `Cmd` registry is global, so names **must be unique** and a collision
+is rejected instead of silently replacing another command. Example processor
+configuration:
+
+```json
+{
+  "name": "agui",
+  "class": "signaldeck_ai.chat_processor.AGUIChatProcessor",
+  "config": {
+    "endpoint": "http://127.0.0.1:8765/ag-ui",
+    "cmd": {"name": "LLM", "timeout_seconds": 120}
+  }
+}
+```
+
+Invoke from a SignalDeck Cmd script:
+
+```text
+LLM Wie hoch war gestern die PV-Produktion?
+```
+
+All trailing Cmd arguments become one prompt. The command awaits the
+response without blocking SignalDeck's asyncio event loop and stores the
+final answer in `CmdResult.state` under the command's `msg` field.
+
+**No token environment variable or persisted API key.** The command works
+*only after* a user successfully connects at least one of **this same
+processor instance's** Chat UI views to cli-agent. It borrows the API token
+from the existing server-side `ChatRuntime` at the time of the invocation.
+Different processor instances are not interchangeable. If nobody logged in,
+the invocation fails before sending any request. Disconnecting the final
+Chat UI view revokes availability until the next manual login. If several
+views of the same instance are connected with **different API tokens**, the
+command fails rather than arbitrarily picking one. A history reset does
+not revoke the token.
+
+Each invocation creates a **fresh cli-agent thread**, with one user prompt
+and no previous Chat UI history or approvals. The AG-UI SSE response is
+consumed to completion; interactive approval interrupts and frontend tool
+handoffs fail rather than being auto-approved. An attempted
+`DELETE /threads/{threadId}` in a `finally` block closes the temporary
+MCP-owning cli-agent session on success, failure or timeout. Deletion
+errors are logged. The command times out after 120 seconds by default,
+configurable from 1 to 600 seconds. Commands have no shared conversation
+history across invocations.
+
+The demo registers `LLM` on its existing `agui` processor. This is a
+server-side feature: an open browser is **not** required once a chat view
+has connected. The connection is held in memory until explicitly
+disconnected or SignalDeck is restarted.
+
+**Current SDK logging caveat:** the central SignalDeck `Cmd._run_single`
+logs whole command lines before and after execution. Prompts included in
+`LLM` Cmd invocations are therefore visible in SignalDeck command logs.
+Do not pass secrets as prompt arguments. The command never logs the
+authentication token.
+
 ## ValueProvider mappings and MCP publication
 
 The processor deliberately separates SignalDeck data resolution from MCP
