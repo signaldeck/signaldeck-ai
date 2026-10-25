@@ -158,7 +158,9 @@ class ChatRuntime:
     def _expire_locked(self) -> None:
         now = time.monotonic()
         for ident, connection in tuple(self._connections.items()):
-            if now - connection.last_used > CONNECTION_IDLE_SECONDS:
+            # A named view persists across navigation until explicit disconnect.
+            if (connection.view_key is None
+                    and now - connection.last_used > CONNECTION_IDLE_SECONDS):
                 self._connections.pop(ident, None)
                 connection.revoked = True
                 # Expired credentials are discarded. Backend thread cleanup is
@@ -179,9 +181,16 @@ class ChatRuntime:
             "Accept": "text/event-stream",
         }
 
-    def verify_and_connect(self, token: str) -> str:
+    def verify_and_connect(self, token: str, view_key: str | None = None) -> str:
         if not isinstance(token, str) or not 1 <= len(token) <= 4096:
             raise ChatActionError("API-Token fehlt oder ist ungültig.")
+        if view_key is not None:
+            view_key = self.normalize_view(view_key)
+            with self._lock:
+                self._expire_locked()
+                existing = self._views.get(view_key)
+                if existing in self._connections:
+                    return existing
         # cli-agent supports the optional capabilities discovery endpoint.
         # No connection state is created until the supplied credential works.
         try:
@@ -200,10 +209,19 @@ class ChatRuntime:
 
         with self._lock:
             self._expire_locked()
+            # Another browser may have connected during token verification.
+            if view_key is not None:
+                existing = self._views.get(view_key)
+                if existing in self._connections:
+                    return existing
             if len(self._connections) >= MAX_CONNECTIONS:
                 raise ChatActionError("Zu viele aktive Chat-Verbindungen.")
             identifier = secrets.token_urlsafe(32)
-            self._connections[identifier] = AgentConnection(token=token)
+            self._connections[identifier] = AgentConnection(
+                token=token, view_key=view_key
+            )
+            if view_key is not None:
+                self._views[view_key] = identifier
             return identifier
 
     def contains(self, identifier: str) -> bool:
