@@ -3,7 +3,7 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "signaldeck-ai"
+name = "signaldeck-plugin-ai"
 version = "0.1.0"
 description = "SignalDeck MCP and AG-UI integration"
 readme = "README.md"

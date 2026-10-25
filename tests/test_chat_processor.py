@@ -322,3 +322,137 @@ def test_invalid_view_values_are_rejected(bad):
 def test_same_value_in_state_list_and_action_scalar():
     assert ChatRuntime.normalize_view(["energie"]) == "energie"
     assert ChatRuntime.normalize_view("energie") == "energie"
+
+
+def test_autoapproved_tool_calls_are_retained_as_collapsible_ui_history_only():
+    """The display can restore auto-approved tool calls without agent context noise."""
+    def events(body):
+        assert all(msg.get("role") != "tools" for msg in body["messages"])
+        return [
+            {"type": "RUN_STARTED"},
+            {"type": "TOOL_CALL_START", "toolCallId": "auto-1",
+             "toolCallName": "signaldeck_climate__get_values"},
+            {"type": "TOOL_CALL_END", "toolCallId": "auto-1"},
+            {"type": "TOOL_CALL_RESULT", "toolCallId": "auto-1",
+             "content": "success"},
+            {"type": "TOOL_CALL_START", "toolCallId": "auto-2",
+             "toolCallName": "signaldeck_energy__get_history"},
+            {"type": "TOOL_CALL_END", "toolCallId": "auto-2"},
+            {"type": "TOOL_CALL_RESULT", "toolCallId": "auto-2",
+             "content": "error"},
+            {"type": "TEXT_MESSAGE_START", "messageId": "answer", "role": "assistant"},
+            {"type": "TEXT_MESSAGE_CONTENT", "messageId": "answer", "delta": "Fertig"},
+            {"type": "TEXT_MESSAGE_END", "messageId": "answer"},
+            {"type": "RUN_FINISHED", "outcome": {"type": "success"}},
+        ]
+
+    factory, requests = make_client(events)
+    runtime = ChatRuntime("http://127.0.0.1:8765/ag-ui", http_client_factory=factory)
+    identifier = runtime.verify_and_connect("test-secret", "energie")
+    run_id = runtime.start_message(identifier, "Wie viel Strom?")
+    await_run(runtime.get_run(identifier, run_id))
+    import time
+    for _ in range(100):
+        if not runtime.view_state("energie")["busy"]:
+            break
+        time.sleep(0.01)
+    snapshot = runtime.view_state("energie")
+    assert [msg["role"] for msg in snapshot["messages"]] == [
+        "user", "tools", "assistant",
+    ]
+    group = snapshot["messages"][1]
+    assert group["id"] == run_id
+    assert group["tools"] == [
+        {"id": "auto-1", "name": "signaldeck_climate__get_values", "status": "success"},
+        {"id": "auto-2", "name": "signaldeck_energy__get_history", "status": "error"},
+    ]
+    assert snapshot["messages"][2]["content"] == "Fertig"
+    assert runtime._connections[identifier].messages == [
+        {"id": runtime._connections[identifier].messages[0]["id"],
+         "role": "user", "content": "Wie viel Strom?"},
+        {"id": runtime._connections[identifier].messages[1]["id"],
+         "role": "assistant", "content": "Fertig"},
+    ]
+    # No display-only tool messages are ever passed back to the LLM.
+    sent = [json.loads(req.content) for req in requests if req.url.path == "/ag-ui"]
+    assert all(msg["role"] in {"user", "assistant"} for msg in sent[0]["messages"])
+    assert runtime.verify_and_connect("test-secret", "energie") == identifier
+    assert runtime.view_state("energie")["messages"] == snapshot["messages"]
+    runtime.new_chat(identifier)
+    assert runtime.view_state("energie")["messages"] == []
+    assert runtime._connections[identifier].tool_calls == {}
+    runtime.shutdown()
+
+
+def test_tool_approval_and_resume_update_existing_call_instead_of_duplicate():
+    def events(body):
+        if "resume" not in body:
+            return [
+                {"type": "RUN_STARTED"},
+                {"type": "TOOL_CALL_START", "toolCallId": "approval-call",
+                 "toolCallName": "device__set"},
+                {"type": "TOOL_CALL_ARGS", "toolCallId": "approval-call",
+                 "delta": '{"secret":"not-for-ui"}'},
+                {"type": "TOOL_CALL_END", "toolCallId": "approval-call"},
+                {"type": "RUN_FINISHED", "outcome": {"type": "interrupt",
+                 "interrupts": [{"id": "int-1", "toolCallId": "approval-call",
+                                 "reason": "tool_call"}]}},
+            ]
+        return [
+            {"type": "RUN_STARTED"},
+            {"type": "TOOL_CALL_START", "toolCallId": "approval-call",
+             "toolCallName": "device__set"},
+            {"type": "TOOL_CALL_RESULT", "toolCallId": "approval-call",
+             "content": "success"},
+            {"type": "RUN_FINISHED", "outcome": {"type": "success"}},
+        ]
+
+    factory, _ = make_client(events)
+    runtime = ChatRuntime("http://127.0.0.1:8765/ag-ui", http_client_factory=factory)
+    identifier = runtime.verify_and_connect("test-secret", "energie")
+    first = runtime.start_message(identifier, "Steuere Gerät")
+    await_run(runtime.get_run(identifier, first))
+    state = runtime.view_state("energie")
+    assert state["messages"][1]["tools"][0]["status"] == "approval"
+    assert "not-for-ui" not in json.dumps(state)
+    second = runtime.approve(identifier, "int-1", "yes")
+    await_run(runtime.get_run(identifier, second))
+    state = runtime.view_state("energie")
+    groups = [m for m in state["messages"] if m["role"] == "tools"]
+    assert len(groups) == 1
+    assert groups[0]["tools"] == [
+        {"id": "approval-call", "name": "device__set", "status": "success"}
+    ]
+    runtime.shutdown()
+
+
+def test_tool_status_without_arguments_error_and_truncation_are_safe():
+    from signaldeck_ai.chat_runtime import AgentConnection, AgentRun, ChatRuntime
+    connection = AgentConnection(token="secret")
+    run = AgentRun("r1", "thread", {})
+    ChatRuntime._record_tool_activity(connection, run, {
+        "type": "TOOL_CALL_START", "toolCallId": "c1",
+        "toolCallName": "x" * 500,
+    })
+    ChatRuntime._record_tool_activity(connection, run, {
+        "type": "RUN_ERROR", "message": "hidden server exception",
+    })
+    assert connection.display_messages[0]["tools"][0]["status"] == "error"
+    assert len(connection.display_messages[0]["tools"][0]["name"]) == 256
+    assert "hidden server exception" not in json.dumps(connection.display_messages)
+    assert connection.messages == []
+
+
+def test_chat_script_renders_tools_as_native_collapsible_details_without_arguments():
+    from pathlib import Path
+    script = (
+        Path(__file__).resolve().parents[1] /
+        "plugins/signaldeck_ai/static/js/chat.js"
+    ).read_text()
+    assert 'createElement("details")' in script
+    assert 'createElement("summary")' in script
+    assert 'case "TOOL_CALL_START":' in script
+    assert 'case "TOOL_CALL_RESULT":' in script
+    assert 'msg.role === "tools"' in script
+    assert "toolCallArgs" not in script
+    assert 'case "TOOL_CALL_ARGS":' not in script

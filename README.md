@@ -1,12 +1,20 @@
-# signaldeck-ai
+# signaldeck-plugin-ai
 
 SignalDeck integration for **MCP** (data access via ValueProvider) and a
 generic **AG-UI 1.0 chat interface**.
+
+The Python distribution is named `signaldeck-plugin-ai` (`pip install .`);
+the import package and SignalDeck processor paths remain `signaldeck_ai`.
+If an older `signaldeck-ai` distribution was installed, uninstall that
+legacy name before reinstalling to avoid two distributions owning the
+same import files: `python -m pip uninstall signaldeck-ai`.
 
 ## Docker
 
 This uses the same container layout as `signaldeck-plugin-socketio`:
 `Dockerfile`, `docker-compose.yml`, `config/`, `plugins/` and logging.
+The demo Docker image tag `signaldeck-ai` is independent of the Python
+package name.
 The image is derived from locally available `signaldeck:dev` (including `signaldeck-plugin-main`).
 
 ```sh
@@ -22,7 +30,7 @@ isolation, and MCP must not be exposed to untrusted networks.
 
 ## Local demo / integration setup
 
-The repository root `config/ai.json` defines an operational three-sensor DummyData setup and `config/group_ai.json` provides the DummyData controls plus MCP status and AG-UI chat. `docker-compose.yml` mounts `./config` at `/config`. The Dockerfile installs the AI plugin, the merged Socket.IO plugin from `main`, and their runtime dependencies; the main plugin is already present in the `signaldeck:dev` base image. Neither `config/` nor `tests/` is packaged in `signaldeck-ai` wheels. The CI builds a wheel and inspects its members to enforce this.
+The repository root `config/ai.json` defines an operational three-sensor DummyData setup and `config/group_ai.json` provides the DummyData controls plus MCP status and AG-UI chat. `docker-compose.yml` mounts `./config` at `/config`. The Dockerfile installs the AI plugin, the merged Socket.IO plugin from `main`, and their runtime dependencies; the main plugin is already present in the `signaldeck:dev` base image. Neither `config/` nor `tests/` is packaged in `signaldeck-plugin-ai` wheels. The CI builds a wheel and inspects its members to enforce this.
 
 - **Garten:** 18.5 °C, synthetic trend of +0.35 °C per day, with 2.0 °C daily variation.
 - **Wohnzimmer:** 21.3 °C, synthetic trend of −0.08 °C per day, with 0.5 °C daily variation.
@@ -632,3 +640,26 @@ the persisted readings. Some synthetic/demo processors do not implement
 timestamped cache data; scalar responses from those processors are ignored
 for the optional merge. Neither `date` nor `days` of the normal daily
 history query is changed.
+
+
+## Einklappbare Tool-Aktivitäten im AG-UI-Chat
+
+Die Chatansicht sammelt alle vom cli-agent bereits gesendeten
+`TOOL_CALL_START`- und `TOOL_CALL_RESULT`-Ereignisse in einer
+**einklappbaren Übersicht pro Agentenlauf**. Das gilt ausdrücklich
+auch für automatisch freigegebene MCP-Tools; neue AG-UI-Events oder
+Änderungen an cli-agent sind nicht erforderlich.
+
+Die Anzeige verwendet nur **Toolname und Ausführungsstatus**.
+Fehlende Argumente werden weder angefordert noch angezeigt.
+Die MCP-Rückgabewerte erscheinen ebenfalls nicht in dieser Übersicht.
+Eine unterbrochene Freigabe und deren Fortsetzung aktualisieren
+denselben Tool-Eintrag statt ihn zu verdoppeln.
+
+Die Übersicht wird nur in der **serverseitigen Darstellungs-Historie**
+gespeichert, getrennt von den Nachrichten für cli-agent. Deshalb
+bleiben die Aufrufe nach Seitenwechseln und automatischer Synchronisierung
+sichtbar, ohne den LLM-Kontext zu vergrößern. Sie werden mit
+**Verlauf zurücksetzen** gelöscht. Die Anzahl der im Speicher
+verfolgten Tool-Aufrufe pro Chat ist auf 1024 begrenzt; bei einem
+SignalDeck-Neustart geht die In-Memory-Darstellungs-Historie verloren.
