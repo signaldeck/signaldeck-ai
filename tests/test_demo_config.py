@@ -124,3 +124,68 @@ def test_llm_script_view_uses_real_main_plugin_script_processor():
         assert cmd.getScript("demo_llm").commands == ["LLM $prompt$"]
     finally:
         loop.close()
+
+
+def test_socketio_haus_demo_uses_real_merged_incoming_router():
+    from signaldeck_plugin_socketio.incoming_routes import IncomingMessageRouter
+    from signaldeck_plugin_socketio.service import SocketIOService
+    from signaldeck_plugin_socketio.processor import SocketIOProcessor
+    from signaldeck_ai.chat_processor import AGUIChatProcessor
+
+    raw = json.loads((ROOT / "config" / "ai.json").read_text(encoding="utf-8"))
+    group = json.loads((ROOT / "config" / "group_ai.json").read_text(encoding="utf-8"))
+    processors = {item["name"]: item for item in raw["processors"]}
+    socketio = processors["socketio"]
+    ai = processors["agui"]["config"]
+    assert socketio["class"] == (
+        "signaldeck_plugin_socketio.processor.SocketIOProcessor"
+    )
+    assert SocketIOProcessor.__name__ == "SocketIOProcessor"
+    cfg = socketio["config"]
+    assert any(room["name"] == "haus" and room["persist"] is False
+               for room in cfg["rooms"])
+    assert cfg["incoming_message_routes"] == [{
+        "rooms": ["haus"], "type": "chat",
+        "prefix": "@haus", "source": "socketio.ai",
+    }]
+    assert cfg["message_routes"] == [{
+        "source": "ai.socketio.haus", "rooms": ["haus"],
+    }]
+    assert ai["socketio_bridge"]["routes"] == [{
+        "room": "haus",
+        "source": "socketio.ai",
+        "response_source": "ai.socketio.haus",
+    }]
+    assert any(item["type"] == "socketio" and item["value"] == ["haus"]
+               for item in group)
+    assert any(item["type"] == "socketio" and item["value"] == ["overview"]
+               for item in group)
+
+    service = SocketIOService()
+    service.configure(cfg)
+    assert service.incoming_router is not None
+    assert service.room_settings("haus").persist is False
+
+    messages = []
+    class Context:
+        def message(self, source, content, *, metadata):
+            messages.append((source, content, metadata))
+
+    event = {
+        "type": "chat", "operation": "upsert", "room": "haus",
+        "id": "demo-message", "transmitter": "demo-client",
+        "transmitterName": "Demo",
+        "payload": {
+            "text": "@haus Wie warm ist es im Garten?",
+            "contentType": "text",
+            "system": False,
+        },
+    }
+    assert service.incoming_router.publish(Context(), event) == 1
+    assert messages[0][0] == "socketio.ai"
+    assert messages[0][1] == "Wie warm ist es im Garten?"
+    assert messages[0][2]["room"] == "haus"
+    assert service.incoming_router.publish(Context(), {
+        **event, "payload": {"text": "Normale Nachricht"}
+    }) == 0
+    assert len(messages) == 1
