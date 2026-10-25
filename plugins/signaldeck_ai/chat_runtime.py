@@ -366,6 +366,10 @@ class ChatRuntime:
         finally:
             with self._lock:
                 if not connection.revoked and connection.current_run == run.run_id:
+                    if run.failed or not run.done:
+                        self._record_tool_activity(
+                            connection, run, {"type": "RUN_ERROR"},
+                        )
                     if run.done and not run.failed:
                         if run.answer and not run.interrupted:
                             connection.messages.append({
