@@ -140,6 +140,34 @@ Add another `MCPServerProcessor` with a distinct port and its own
 value/method allowlist. Each instance publishes its own
 `/mcp` endpoint and DisplayData status/tool list.
 
+### MCP-Server-Oberfläche und Tool-Testkonsole
+
+Der MCP-DisplayProcessor zeigt die vom **tatsächlichen FastMCP-Server**
+registrierten Tools, ihre ausführlichen Beschreibungen und ihre
+generierten JSON-Eingabe-/Ausgabeschemas. Die Ansicht ist kein separat
+gepflegtes Toolverzeichnis: sie liest die FastMCP-Registry.
+
+Jedes Tool lässt sich aus der SignalDeck-Oberfläche ausprobieren:
+
+1. MCP-Server-Panel öffnen und ein Tool aufklappen.
+2. Das JSON-Eingabefeld bearbeiten (für lesende Tools werden Beispiele
+   aus der `mcp_data`-Konfiguration vorgeschlagen).
+3. `Tool ausführen` anklicken und die serialisierte MCP-Rückgabe ansehen.
+
+Alle Testaufrufe laufen über SignalDeck `POST /run` und den bestehenden
+ActionDispatcher/DisplayProcessor, nicht über einen ungeschützten zweiten
+HTTP-Endpunkt. Die Ausführung nutzt `FastMCP.call_tool` und damit die
+**gleichen registrierten Handler und Eingabeschemas** wie ein externer
+MCP-Client. Es wird kein cli-agent für das Testen benötigt.
+
+`execute_action` ist als Schreibaktion markiert und verlangt ein
+zusätzliches Bestätigungs-Kontrollkästchen. Die Bestätigung wird auch
+serverseitig geprüft. **Wichtig:** Diese Bestätigung ersetzt keine
+Authentifizierung oder Autorisierung. In produktiven Installationen
+muss der SignalDeck-Webzugriff geschützt werden; die Testkonsole kann
+alle konfigurierten MCP-Schreibaktionen ausführen. Der Demo-Prozessor
+verändert ausschließlich Dummy-Werte.
+
 ## AG-UI
 
 `AGUIChatProcessor` integrates the generic AG-UI 1.0 HTTP/SSE transport with
