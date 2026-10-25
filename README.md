@@ -293,6 +293,37 @@ The cli-agent-specific `GET /ag-ui/capabilities` discovery URL and
 validation and cleanup. Other AG-UI servers may need different discovery and
 cleanup mechanisms.
 
+### Gemeinsame Chats pro View-`value`
+
+Der `AGUIChatProcessor` verwaltet **eine Session pro konfiguriertem
+`value`**. Die Zuordnung ist ausschließlich serverseitig und gilt für die
+jeweilige Processor-Instanz. Verschiedene Werte haben getrennte Agenten-Threads,
+Nachrichten und ausstehende Tool-Freigaben. Identische Werte teilen sich
+dieselbe Session, **auch in verschiedenen Browsern**. SignalDeck benötigt
+hierfür keine Browser-/Benutzersessions.
+
+Beim Öffnen fragt die Oberfläche über die native `POST /run`-Aktion
+`ai_action=state` den Chatstatus ab und stellt den Verlauf wieder her.
+Während eine andere View desselben Werts antwortet, wird der Verlauf
+regelmäßig aktualisiert; parallele neue Anfragen werden gesperrt. Der
+API-Token bleibt im SignalDeck-Serverprozess, wird nicht in der Browser-UI
+übertragen oder dauerhaft gespeichert. Der zurückgegebene
+`connection_id`-Handle ermöglicht allerdings jedem Browser mit Zugriff
+auf dieselbe View, die gemeinsame Agentenverbindung zu benutzen: **SignalDeck
+muss daher für vertrauenswürdige Nutzer geschützt erreichbar sein.**
+
+Mit `Verlauf zurücksetzen` wird nur der Thread des jeweiligen Werts
+zurückgesetzt. `Trennen` beendet die gemeinsame Verbindung für alle
+gleichzeitig geöffneten Ansichten dieses Werts. Die gespeicherten Chats
+überleben einen Seitenwechsel und das Schließen des Browsers, **nicht** den
+Neustart von SignalDeck. Sie bleiben bis `Trennen` oder Server-Neustart
+im Speicher; die 30-Minuten-Leerlaufgrenze gilt weiterhin nur für
+nicht benannte Legacy-Verbindungen.
+
+Die Demo unter `config/group_ai.json` enthält zwei Chat-Views des selben
+Prozessors mit `value=["energie"]` und `value=["haussteuerung"]`.
+Sie lassen sich unabhängig voneinander testen.
+
 ### Security
 
 The cli-agent bearer token is provided in the SignalDeck Chat UI at connection
@@ -316,8 +347,7 @@ The first browser UI supports textual messages, tool-status events,
 and a single approval interrupt. Runs execute on worker threads and bounded
 SSE replays keep the SignalDeck `/run` handler responsive. The browser
 never receives the agent API token, but does receive a temporary opaque
-connection handle held only in its in-page JavaScript state. Credentials
-expire from server memory after 30 minutes of inactivity or on disconnect.
+connection handle held only in its in-page JavaScript state. Connections scoped to a named view remain in server memory until disconnect or shutdown. Only standalone legacy connections expire after 30 minutes of inactivity.
 Frontend-provided AG-UI tools, multi-interrupt and multimodal handling are
 not implemented yet.
 
