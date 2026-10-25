@@ -42,7 +42,7 @@ The integration tests under `tests/test_demo_config.py` use the **real** DummyDa
 1. Start SignalDeck; its MCP servers start immediately, while the Chat
    DisplayProcessor remains unconnected.
 2. Configure cli-agent's Streamable HTTP MCP server to
-   `http://127.0.0.1:8766/mcp` and start `cli-agent-api`.
+   `http://127.0.0.1:8766/mcp` and start `cli-agent-api`: `cli-agent-api --approve-tool signaldeck_climate__get_values --approve-tool signaldeck_climate__get_history --port 8765 --config config_openrouter.toml`
 3. Open SignalDeck's Chat DisplayProcessor, enter the bearer token printed
    by `cli-agent-api` into the password field, then click **Verbinden**.
    SignalDeck requires no restart or token configuration file.
