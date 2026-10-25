@@ -238,7 +238,23 @@ class MCPServerProcessor(DisplayProcessor):
     def registered_tool_catalog(self) -> list[dict[str, Any]]:
         if self.runtime is None:
             return []
-        return self.runtime.tool_catalog()
+        tools = self.runtime.tool_catalog()
+        for tool in tools:
+            name = tool["name"]
+            if name == "get_values":
+                keys = list(self.value_specs)
+                tool["example_args"] = {"fields": keys[:1]} if keys else {}
+            elif name == "get_history":
+                keys = list(self.history_specs)
+                tool["example_args"] = (
+                    {"name": keys[0], "days": 2, "include_points": True}
+                    if keys else {}
+                )
+            else:
+                # Never prepopulate write parameters with potentially unsafe
+                # commands or values. Explicit manual entry is required.
+                tool["example_args"] = {}
+        return tools
 
     def process(self, value, actionHash, file=None, **params):
         """Use the standard SignalDeck action dispatcher, without rerendering.
