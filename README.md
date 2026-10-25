@@ -46,17 +46,17 @@ url = "http://127.0.0.1:8766/mcp"
 The processor deliberately separates SignalDeck data resolution from MCP
 publication:
 
-- \`config.values\` and \`config.methods\` use **unmodified** SignalDeck SDK
-  configuration. Their \`name\` keys establish local names and their \`from\`
+- `config.values` and `config.methods` use **unmodified** SignalDeck SDK
+  configuration. Their `name` keys establish local names and their `from`
   keys reference exports from other processors.
-- \`config.mcp_data.values\` chooses permitted local values by \`field\`.
-- \`config.mcp_data.data_rows\` chooses permitted local methods by \`func\`.
-- \`description\` is defined **only** in \`mcp_data\`. A configured value or
+- `config.mcp_data.values` chooses permitted local values by `field`.
+- `config.mcp_data.data_rows` chooses permitted local methods by `func`.
+- `description` is defined **only** in `mcp_data`. A configured value or
   method is **not** automatically exposed through MCP.
 
-Example of an MCP processor's \`config\`:
+Example of an MCP processor's `config`:
 
-\`\`\`json
+```json
 {
   "mcp": {"name": "house-climate", "host": "127.0.0.1", "port": 8766},
   "values": [
@@ -83,16 +83,16 @@ Example of an MCP processor's \`config\`:
     ]
   }
 }
-\`\`\`
+```
 
-Here \`temperature_garten\` illustrates a ValueProvider export name; your
+Here `temperature_garten` illustrates a ValueProvider export name; your
 producing processor must actually publish that exact alias. The exported
-historical method \`hist_temperature_garten\` occurs in the Ecowitt example.
-\`temp_intern\` deliberately remains unavailable through MCP.
+historical method `hist_temperature_garten` occurs in the Ecowitt example.
+`temp_intern` deliberately remains unavailable through MCP.
 
-At startup, every \`mcp_data.values[].field\` must refer to a local
-\`config.values[].name\`, and every \`mcp_data.data_rows[].func\` must refer
-to a local \`config.methods[].name\`. Invalid entries fail configuration
+At startup, every `mcp_data.values[].field` must refer to a local
+`config.values[].name`, and every `mcp_data.data_rows[].func` must refer
+to a local `config.methods[].name`. Invalid entries fail configuration
 validation rather than exposing other fields by accident.
 
 Read calls resolve **only** allowlisted ValueProvider references and never
