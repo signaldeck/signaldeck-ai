@@ -41,54 +41,62 @@ transport = "streamable_http"
 url = "http://127.0.0.1:8766/mcp"
 ```
 
-## The SignalDeck ValueProvider configuration
+## ValueProvider mappings and MCP publication
 
-MCP reuses the existing SignalDeck `Processor.refresh()` mechanism,
-without inventing a new way to reference data:
+The processor deliberately separates SignalDeck data resolution from MCP
+publication:
 
-- `values`: each item has `type: "field"` or `"method"`,
-  `name`, and `from`. Additional `description` and optional
-  `unit` are passed to the MCP user.
-- `methods`: each item has `name` and `from`, just like any
-  SignalDeck consumer of a published method. Additional
-  `kind: "history"` or `"action"` limits its MCP exposure.
-- Producers must explicitly export these names in their own
-  `config.export.values` and `config.export.methods`.
+- \`config.values\` and \`config.methods\` use **unmodified** SignalDeck SDK
+  configuration. Their \`name\` keys establish local names and their \`from\`
+  keys reference exports from other processors.
+- \`config.mcp_data.values\` chooses permitted local values by \`field\`.
+- \`config.mcp_data.data_rows\` chooses permitted local methods by \`func\`.
+- \`description\` is defined **only** in \`mcp_data\`. A configured value or
+  method is **not** automatically exposed through MCP.
 
-Example subset of an MCP processor's `config`:
+Example of an MCP processor's \`config\`:
 
-```json
+\`\`\`json
 {
   "mcp": {"name": "house-climate", "host": "127.0.0.1", "port": 8766},
   "values": [
-    {
-      "type": "field",
-      "name": "basement_temperature",
-      "from": "temperature_basement",
-      "description": "Temperature in the basement",
-      "unit": "°C"
-    }
+    {"name": "temp_garten", "type": "field", "from": "temperature_garten"},
+    {"name": "temp_intern", "type": "field", "from": "another_export"}
   ],
   "methods": [
-    {
-      "name": "basement_history",
-      "from": "hist_temperature_vorratsraum",
-      "kind": "history",
-      "description": "Recorded temperature in the basement",
-      "mode": "per_day",
-      "max_days": 30,
-      "unit": "°C"
-    }
-  ]
+    {"name": "hist_temp_garten", "from": "hist_temperature_garten"}
+  ],
+  "mcp_data": {
+    "values": [
+      {
+        "field": "temp_garten",
+        "description": "Aktuelle Temperatur im Garten",
+        "unit": "°C"
+      }
+    ],
+    "data_rows": [
+      {
+        "func": "hist_temp_garten",
+        "description": "Temperaturverlauf im Garten",
+        "max_days": 30
+      }
+    ]
+  }
 }
-```
+\`\`\`
 
-`temperature_basement` is just an example producer export name.
-`hist_temperature_vorratsraum` is exported by the Ecowitt
-example config. The exporting producer must be included in the same
-SignalDeck configuration; the minimal `config/ai.json` contains no
-producer, so its initial MCP server publishes an empty current-values
-tool until you configure bindings.
+Here \`temperature_garten\` illustrates a ValueProvider export name; your
+producing processor must actually publish that exact alias. The exported
+historical method \`hist_temperature_garten\` occurs in the Ecowitt example.
+\`temp_intern\` deliberately remains unavailable through MCP.
+
+At startup, every \`mcp_data.values[].field\` must refer to a local
+\`config.values[].name\`, and every \`mcp_data.data_rows[].func\` must refer
+to a local \`config.methods[].name\`. Invalid entries fail configuration
+validation rather than exposing other fields by accident.
+
+Read calls resolve **only** allowlisted ValueProvider references and never
+invoke unrelated entries while refreshing a processor.
 
 ### Historical data
 
@@ -105,11 +113,13 @@ Use `mode=range` for exported methods that already support
 
 ### Actions
 
-Action methods must be explicitly listed with `kind: "action"`,
-a nonempty `description`, and a JSON Schema `parameters` object
-with `additionalProperties: false`. Arguments are validated before
-calling `ValueProvider.getMethodValue()`. LLM-side user approvals
-remain strongly recommended for actual device changes.
+Actions are optional and configured exclusively through
+`config.mcp_data.actions`, with `func` pointing to a local
+`config.methods[].name`. Each action needs a `description` and a JSON
+Schema `parameters` object with `additionalProperties: false`.
+Arguments are validated before calling the underlying ValueProvider
+method. No method is published as an action implicitly. LLM-side user
+approval remains important for real device changes.
 
 ### Multiple MCP servers
 
