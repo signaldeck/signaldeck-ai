@@ -1,6 +1,6 @@
 """Integration tests: real main-plugin DummyData -> SDK ValueProvider -> MCP."""
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -45,7 +45,7 @@ def test_real_dummy_data_exports_and_selected_values(demo):
 
 def test_dummy_historical_temperature_is_synthetic(demo):
     dummy, mcp, provider, _ = demo
-    history = mcp.read_history("hist_temp_garten", date=datetime.now().date().isoformat(), days=7, include_points=True)
+    history = mcp.read_history("hist_temp_garten", date=(datetime.now() - timedelta(days=6)).date().isoformat(), days=7, include_points=True)
     assert 6 * 48 <= history["statistics"]["count"] <= 7 * 48
     assert len(history["points"]) == 200  # bounded default sample
     assert history["sampled"] is True
@@ -55,7 +55,7 @@ def test_dummy_historical_temperature_is_synthetic(demo):
     assert all("time_inferred" not in point for point in history["points"])
     assert all(not point["time"].startswith("day-") for point in history["points"])
     assert len({point["time"][:10] for point in history["points"]}) >= 6
-    assert 48 <= mcp.read_history("hist_temp_wohnzimmer", date=datetime.now().date().isoformat(), days=2)["statistics"]["count"] <= 96
+    assert 48 <= mcp.read_history("hist_temp_wohnzimmer", date=(datetime.now() - timedelta(days=1)).date().isoformat(), days=2)["statistics"]["count"] <= 96
     with pytest.raises(ValueError):
         mcp.read_history("unknown_method", date=datetime.now().date().isoformat(), days=1)
 
