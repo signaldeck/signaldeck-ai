@@ -86,3 +86,41 @@ def test_demo_config_is_not_a_python_package():
     from signaldeck_ai import __file__ as package_init
     package_path = Path(package_init).resolve().parent
     assert not (package_path / "config").exists()
+
+
+def test_llm_script_view_uses_real_main_plugin_script_processor():
+    from signaldeck_sdk import Cmd, ScriptDefinition
+    from signaldeck_plugin_main.processors.script.script_processor import ScriptProcessor
+    from signaldeck_ai.chat_processor import AGUIChatProcessor
+    import asyncio
+
+    config = json.loads((ROOT / "config" / "ai.json").read_text(encoding="utf-8"))
+    group = json.loads((ROOT / "config" / "group_ai.json").read_text(encoding="utf-8"))
+    processors = {item["name"]: item for item in config["processors"]}
+    scripts = {item["name"]: item for item in config["cmd"]["script"]}
+
+    assert processors["script"]["class"] == (
+        "signaldeck_plugin_main.processors.script.script_processor.ScriptProcessor"
+    )
+    assert processors["agui"]["config"]["cmd"]["name"] == "LLM"
+    script = ScriptDefinition.from_dict(scripts["demo_llm"])
+    assert script.commands == ["LLM $prompt$"]
+    assert [(v.name, v.type) for v in script.variables] == [("prompt", "str")]
+    assert script.variables[0].default
+    assert any(item["type"] == "script" and item["value"] == ["demo_llm"]
+               for item in group)
+
+    # Exercise the Main plugin's actual view selection, not a local replica.
+    vp = ValueProvider()
+    processor = ScriptProcessor(
+        "script", processors["script"]["config"], SimpleNamespace(), vp, False
+    )
+    loop = asyncio.new_event_loop()
+    try:
+        cmd = Cmd(loop)
+        cmd.registerScripts(config["cmd"]["script"])
+        processor.registerCommands(cmd)
+        assert processor._resolve_selection(["demo_llm"]) == "demo_llm"
+        assert cmd.getScript("demo_llm").commands == ["LLM $prompt$"]
+    finally:
+        loop.close()
