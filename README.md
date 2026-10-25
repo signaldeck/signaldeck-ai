@@ -57,6 +57,25 @@ transport = "streamable_http"
 url = "http://127.0.0.1:8766/mcp"
 ```
 
+## Demo: LLM via Script View
+
+The developer config includes a `ScriptProcessor` (from
+`signaldeck-plugin-main`) and an **LLM-Skript testen** View preselecting
+`demo_llm`. Its single editable `prompt` string variable is interpolated
+into the command:
+
+```text
+LLM $prompt$
+```
+
+Start `cli-agent-api`, open either **Agenten-Chat Energie** or
+**Agenten-Chat Haus** and enter its bearer token once using **Verbinden**.
+Then open **LLM-Skript testen**, change the prompt as desired and start
+the script. The answer appears in the Script View's command output
+(refresh the view if necessary). Before the Chat UI has authenticated
+the AI processor, the LLM command is expected to fail. The script is
+only a developer test; it does not modify real devices.
+
 ## Optional one-shot LLM Cmd
 
 Each `AGUIChatProcessor` can register a separate SignalDeck command.
