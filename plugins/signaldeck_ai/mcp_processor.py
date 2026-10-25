@@ -248,7 +248,7 @@ class MCPServerProcessor(DisplayProcessor):
             # Only the current calendar day can contain measurements that
             # have not yet reached the persistent store. PersistData.hist
             # exposes its in-memory deque via currentValues=True.
-            if first_day <= datetime.now().date() <= end_day:
+            if spec.get("mode", "per_day") == "per_day" and target_day <= datetime.now().date() <= end_day:
                 try:
                     cached = self.valueProvider.getMethodValue(
                         provider_method, currentValues=True,
