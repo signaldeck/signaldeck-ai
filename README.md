@@ -588,3 +588,20 @@ Request validation rejects future or invalid calendar dates and respects
 the individual `max_days` limits. Scalar historical results are marked
 `time_inferred` with the requested calendar day rather than the current
 time. Previously saved requests containing only `days` need a `date`.
+
+### In-memory measurements on the current day
+
+For a requested date window that includes **today**, `get_history`
+queries both the normal persisted day (`hist(date=..., days=0,
+fullDay=True)`) and the in-memory measurement buffer using
+`hist(currentValues=True)`. Only actual timestamped samples for today's
+calendar date are merged; any matching timestamp is counted once, with
+the cache value taking precedence. All aggregate statistics and optional
+`points` are calculated **after** merging, before output sampling.
+For earlier days the cache is never requested.
+
+A processor without `cacheSize` (or with an empty cache) simply returns
+the persisted readings. Some synthetic/demo processors do not implement
+timestamped cache data; scalar responses from those processors are ignored
+for the optional merge. Neither `date` nor `days` of the normal daily
+history query is changed.
