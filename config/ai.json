@@ -291,6 +291,17 @@
         "cmd": {
           "name": "LLM",
           "timeout_seconds": 120
+        },
+        "socketio_bridge": {
+          "routes": [
+            {
+              "room": "haus",
+              "source": "socketio.ai",
+              "response_source": "ai.socketio.haus"
+            }
+          ],
+          "max_queue": 5,
+          "timeout_seconds": 120
         }
       }
     },
