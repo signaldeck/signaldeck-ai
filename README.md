@@ -29,9 +29,9 @@ The repository root `config/ai.json` defines an operational three-sensor DummyDa
 - **Keller:** 17.8 °C, synthetic trend of +0.03 °C per day, with 0.2 °C daily variation.
 - **Test action:** `set_temp_garten` changes only the simulated garden temperature, through the DummyData processor. No real hardware connection is configured.
 
-Use `get_values({"fields": ["temp_garten"]})`, `get_history({"name": "hist_temp_garten", "days": 7, "include_points": true})` or `execute_action({"name": "set_temp_garten", "arguments": {"temp_garten": 23.5}})` from a connected MCP client. Action calls can also exercise cli-agent approvals without affecting real devices.
+Use `get_values({"fields": ["temp_garten"]})`, `get_history({"name": "hist_temp_garten", "date": "2026-10-25", "days": 7, "include_points": true})` or `execute_action({"name": "set_temp_garten", "arguments": {"temp_garten": 23.5}})` from a connected MCP client. Action calls can also exercise cli-agent approvals without affecting real devices.
 
-For `get_history({\"name\": \"hist_temp_garten\", \"days\": 7, \"include_points\": true})`, there are 48 actual datetime-indexed samples per completed day and the partial current day, so the MCP results have meaningful ISO-8601 timestamps (without `time_inferred`). The MCP response samples at most 200 points by default while summary statistics cover the complete time series. To retrieve up to 1,000 points use `max_points: 1000`.
+For `get_history({\"name\": \"hist_temp_garten\", \"date\": \"2026-10-25\", \"days\": 7, \"include_points\": true})`, there are 48 actual datetime-indexed samples per completed day and the partial current day, so the MCP results have meaningful ISO-8601 timestamps (without `time_inferred`). The MCP response samples at most 200 points by default while summary statistics cover the complete time series. To retrieve up to 1,000 points use `max_points: 1000`.
 
 While `signaldeck-plugin-main` [PR #7](https://github.com/signaldeck/signaldeck-plugin-main/pull/7) is under review, the demo Dockerfile and CI install its `feature/dummy-history-series` branch. **After that PR is merged**, switch the dependency back to the main release branch. These demo dependencies are not bundled in the AI plugin wheel.
 
@@ -303,7 +303,7 @@ names remain stable, which preserves cli-agent approval matching.
 
 ### Historical data
 
-The shared `PersistData.hist(days=N, fullDay=True)` fetches one
+The shared `PersistData.hist(date=target_day, days=0, fullDay=True)` fetches one
 individual day offset N, **not** an N-day window. For `mode=per_day`
 the new MCP processor calls the same ValueProvider method for each
 offset from 0 through N-1. Exact numeric count, min, max and mean are
@@ -312,7 +312,7 @@ to at most 1000 points). Individual history mappings can restrict
 the permitted `max_days`.
 
 Use `mode=range` for exported methods that already support
-`days=N` to return a complete range.
+`date=YYYY-MM-DD` as the inclusive end date and `days=N` as the number of days up to and including that date.
 
 History entries always use ISO 8601 date/time strings (for example,
 `2026-10-23T09:10:00+00:00`) rather than synthetic `day-0` labels.
@@ -569,3 +569,22 @@ python -m pytest
 This is an **initial implementation**, not an end-to-end-validated
 release. It still needs integration testing with a real SignalDeck
 instance, MCP server and cli-agent-api.
+
+### Date-based history calls
+
+`get_history` requires `date` in ISO calendar format (`YYYY-MM-DD`).
+`days` is now the number of days **ending on that explicit date**
+(default 1), not a relative offset from now. Example:
+
+```json
+{"name":"hist_temp_garten","date":"2026-10-20","days":2,"include_points":true}
+```
+
+This selects October 19 and October 20. Each selected day is dispatched
+through the existing SignalDeck `hist(date=<that day>, days=0,
+fullDay=True)` API: the underlying `days` argument is an offset, hence
+**must remain zero** to avoid accidentally selecting an earlier day.
+Request validation rejects future or invalid calendar dates and respects
+the individual `max_days` limits. Scalar historical results are marked
+`time_inferred` with the requested calendar day rather than the current
+time. Previously saved requests containing only `days` need a `date`.
