@@ -1,4 +1,4 @@
-"""SignalDeck MCP processor: native config.values/config.methods bindings."""
+"""MCP exposure configuration layered over native SignalDeck ValueProvider mappings."""
 from __future__ import annotations
 
 import json
@@ -23,77 +23,115 @@ class MCPDisplayData(DisplayData):
 
 
 class MCPServerProcessor(DisplayProcessor):
-    """Expose *only* explicitly configured ValueProvider aliases over MCP.
+    """Publish only explicitly listed config.mcp_data entries.
 
-    config.values and config.methods use the unmodified SignalDeck SDK
-    syntax. 'description' / 'kind' add only MCP exposure metadata.
+    config.values and config.methods keep their standard SignalDeck SDK format
+    (name/type/from/args/params). config.mcp_data is a *separate* allowlist
+    carrying LLM-facing descriptions. Its 'field' and 'func' keys reference
+    the local names from those standard mappings, not provider export names.
     """
 
     def __init__(self, name, config, ctx, valueProvider, collect_data):
         super().__init__(name, config, ctx, valueProvider, collect_data)
         self._read_lock = RLock()
-        self.value_specs = self._specs("values")
-        all_methods = self._specs("methods")
-        self.history_specs = {
-            key: item for key, item in all_methods.items()
-            if item.get("kind") == "history"
-        }
-        self.action_specs = {
-            key: item for key, item in all_methods.items()
-            if item.get("kind") == "action"
-        }
-        self._validate()
+
+        self._value_bindings = self._bindings("values")
+        self._method_bindings = self._bindings("methods")
+        mcp_data = self.config.get("mcp_data", {})
+        if not isinstance(mcp_data, dict):
+            raise ValueError("mcp_data must be an object")
+
+        self.value_specs = self._exposures(
+            "values", mcp_data.get("values", []), "field", self._value_bindings
+        )
+        self.history_specs = self._exposures(
+            "data_rows", mcp_data.get("data_rows", []), "func", self._method_bindings
+        )
+        # Actions are optional; they follow the same explicit allowlist
+        # principle, without embedding MCP metadata in config.methods.
+        self.action_specs = self._exposures(
+            "actions", mcp_data.get("actions", []), "func", self._method_bindings
+        )
+        self._validate_exposures()
         self.runtime: MCPRuntime | None = None
 
-    def _specs(self, key: str) -> dict[str, dict[str, Any]]:
+    def _bindings(self, key: str) -> dict[str, dict[str, Any]]:
+        mappings = self.config.get(key, [])
+        if not isinstance(mappings, list):
+            raise ValueError(f"{key} must be a list")
         result = {}
-        for raw in self.config.get(key, []):
+        for raw in mappings:
             if not isinstance(raw, dict):
                 raise ValueError(f"{key}: each entry must be an object")
-            name = raw.get("name")
+            name, source = raw.get("name"), raw.get("from")
             if not isinstance(name, str) or not name or name in result:
-                raise ValueError(f"{key}: missing or duplicate alias name")
-            if not isinstance(raw.get("from"), str) or not raw["from"]:
-                raise ValueError(f"{key}.{name}: a ValueProvider 'from' reference is required")
-            if not isinstance(raw.get("description"), str) or not raw["description"].strip():
-                raise ValueError(f"{key}.{name}: an MCP description is required")
+                raise ValueError(f"{key}: missing or duplicate local name")
+            if not isinstance(source, str) or not source:
+                raise ValueError(f"{key}.{name}: nonempty 'from' required")
+            if key == "values" and raw.get("type") not in {"field", "method"}:
+                raise ValueError(f"{key}.{name}: type must be 'field' or 'method'")
             result[name] = dict(raw)
         return result
 
-    def _validate(self) -> None:
-        for name, item in self.value_specs.items():
-            if item.get("type") not in {"field", "method"}:
-                raise ValueError(f"values.{name}: type must be field or method")
-        for item in self.config.get("methods", []):
-            if item.get("kind") not in {"history", "action"}:
+    @staticmethod
+    def _exposures(
+        group: str,
+        items: Any,
+        identifier_key: str,
+        allowed: dict[str, dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        if not isinstance(items, list):
+            raise ValueError(f"mcp_data.{group} must be a list")
+        result = {}
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError(f"mcp_data.{group}: each entry must be an object")
+            identifier, description = item.get(identifier_key), item.get("description")
+            if not isinstance(identifier, str) or not identifier or identifier in result:
+                raise ValueError(f"mcp_data.{group}: missing or duplicate '{identifier_key}'")
+            if identifier not in allowed:
                 raise ValueError(
-                    f"methods.{item.get('name')}: kind must be history or action"
+                    f"mcp_data.{group}.{identifier} references an unknown "
+                    f"config.{ 'values' if identifier_key == 'field' else 'methods' } name"
                 )
-        for name, item in self.history_specs.items():
-            if not 1 <= int(item.get("max_days", 30)) <= 366:
-                raise ValueError(f"methods.{name}: max_days must be 1..366")
-            if item.get("mode", "per_day") not in {"per_day", "range"}:
-                raise ValueError(f"methods.{name}: mode must be per_day or range")
-        for name, item in self.action_specs.items():
-            schema = item.get("parameters")
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError(f"mcp_data.{group}.{identifier}: description required")
+            # Preserve original MCP metadata while presenting a normalized
+            # 'name' to the FastMCP tool descriptions and handlers.
+            result[identifier] = {**item, "name": identifier}
+        return result
+
+    def _validate_exposures(self) -> None:
+        for name, spec in self.history_specs.items():
+            max_days = spec.get("max_days", 30)
+            if type(max_days) is not int or not 1 <= max_days <= 366:
+                raise ValueError(f"mcp_data.data_rows.{name}: max_days must be 1..366")
+            if spec.get("mode", "per_day") not in {"per_day", "range"}:
+                raise ValueError(f"mcp_data.data_rows.{name}: invalid mode")
+        for name, spec in self.action_specs.items():
+            schema = spec.get("parameters")
             if not isinstance(schema, dict) or schema.get("type") != "object":
-                raise ValueError(f"methods.{name}: action parameters require an object schema")
+                raise ValueError(f"mcp_data.actions.{name}: object parameters required")
             if schema.get("additionalProperties") is not False:
-                raise ValueError(f"methods.{name}: action schema must forbid additionalProperties")
+                raise ValueError(
+                    f"mcp_data.actions.{name}: parameters must forbid additionalProperties"
+                )
             Draft202012Validator.check_schema(schema)
 
     def tool_descriptions(self) -> list[dict[str, Any]]:
-        result = [{"name": "get_values", "description": "Read current values"}]
+        result = []
+        if self.value_specs:
+            result.append({"name": "get_values", "description": "Read permitted current values"})
         if self.history_specs:
-            result.append({"name": "get_history", "description": "Read configured histories"})
+            result.append({"name": "get_history", "description": "Read permitted data rows"})
         if self.action_specs:
-            result.append({"name": "execute_action", "description": "Run configured actions"})
+            result.append({"name": "execute_action", "description": "Run permitted actions"})
         return result
 
     def read_values(self) -> dict[str, Any]:
         with self._read_lock:
-            # Processor.refresh uses the normal ValueProvider APIs to resolve
-            # references by their configured 'from' names.
+            # Standard Processor.refresh() resolves the unmodified config.values
+            # using ValueProvider. Only mcp_data.values are returned to the LLM.
             self.refresh()
             return {
                 name: {
@@ -109,40 +147,44 @@ class MCPServerProcessor(DisplayProcessor):
         include_points: bool = False, max_points: int = 200,
     ) -> dict[str, Any]:
         if name not in self.history_specs:
-            raise ValueError("Unknown or unauthorized history")
+            raise ValueError("Unknown or unauthorized data row")
         spec = self.history_specs[name]
-        if type(days) is not int or days < 1 or days > int(spec.get("max_days", 30)):
+        if type(days) is not int or not 1 <= days <= spec.get("max_days", 30):
             raise ValueError("Requested history range is not permitted")
         if type(max_points) is not int or not 1 <= max_points <= 1000:
             raise ValueError("max_points must be between 1 and 1000")
-        alias = spec["from"]
+
+        # config.methods maps the local 'func' to the exported ValueProvider
+        # method, as elsewhere in SignalDeck.
+        binding = self._method_bindings[name]
+        provider_method = binding["from"]
         with self._read_lock:
             points = []
             if spec.get("mode", "per_day") == "range":
-                value = self.valueProvider.getMethodValue(alias, days=days)
-                points.extend(series_points(value, day=days))
+                result = self.valueProvider.getMethodValue(provider_method, days=days)
+                points.extend(series_points(result, day=days))
             else:
-                # PersistData.hist(days=N, fullDay=True) fetches ONE day at
-                # offset N, not an entire N-day range. Iterate explicitly.
+                # PersistData.hist(days=N, fullDay=True) returns one day at
+                # offset N; iterate to collect a complete window.
                 for offset in range(days):
-                    value = self.valueProvider.getMethodValue(
-                        alias, days=offset, fullDay=True
+                    result = self.valueProvider.getMethodValue(
+                        provider_method, days=offset, fullDay=True
                     )
-                    points.extend(series_points(value, day=offset))
-        points.sort(key=lambda p: str(p["time"]))
-        result = {
+                    points.extend(series_points(result, day=offset))
+        points.sort(key=lambda row: str(row["time"]))
+        output = {
             "name": name,
             "description": spec["description"],
             "days": days,
             "statistics": summarize_points(points),
         }
         if "unit" in spec:
-            result["unit"] = spec["unit"]
+            output["unit"] = spec["unit"]
         if include_points:
-            result["points"] = bounded_sample(points, max_points)
-            result["sampled"] = len(points) > max_points
-            result["total_points"] = len(points)
-        return result
+            output["points"] = bounded_sample(points, max_points)
+            output["sampled"] = len(points) > max_points
+            output["total_points"] = len(points)
+        return output
 
     def execute_action(self, name: str, arguments: dict[str, Any]) -> Any:
         if name not in self.action_specs:
@@ -154,7 +196,9 @@ class MCPServerProcessor(DisplayProcessor):
         spec = self.action_specs[name]
         Draft202012Validator(spec["parameters"]).validate(arguments)
         with self._read_lock:
-            result = self.valueProvider.getMethodValue(spec["from"], **arguments)
+            result = self.valueProvider.getMethodValue(
+                self._method_bindings[name]["from"], **arguments
+            )
         return json_safe(result)
 
     def getTemplate(self, value):
