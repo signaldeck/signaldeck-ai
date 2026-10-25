@@ -44,7 +44,8 @@ def test_catalog_is_actual_registered_mcp_tool_schema(console_processor):
     history_description = tools["get_history"]["description"]
     assert "AGGREGATE STATISTICS" in history_description
     assert "ALL measurements" in history_description
-    assert "now minus N days" in history_description
+    assert "inclusive END date" in history_description
+    assert "date" in tools["get_history"]["input_schema"]["required"]
     props = tools["get_history"]["input_schema"]["properties"]
     assert "aggregate statistics" in props["include_points"]["description"]
     assert "No individual points" in props["include_points"]["description"]
@@ -72,7 +73,7 @@ def test_history_tool_executes_with_fastmcp(console_processor):
     result = invoke(
         processor, tool_name="get_history",
         arguments=json.dumps({
-            "name": "hist_temp_garten", "days": 2, "include_points": True
+            "name": "hist_temp_garten", "date": "2026-10-24", "days": 2, "include_points": True
         }),
     )
     assert result["ok"], result
