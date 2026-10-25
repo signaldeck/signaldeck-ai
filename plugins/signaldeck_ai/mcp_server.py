@@ -66,6 +66,7 @@ class MCPRuntime:
         fields = processor.value_specs
         history = processor.history_specs
         actions = processor.action_specs
+        runs = processor.run_actions.descriptions()
 
         descriptions = "\n".join(
             f"- {f['name']}: {f['description']}" for f in fields.values()
@@ -153,6 +154,33 @@ class MCPRuntime:
             def execute_action(name: str, arguments: dict[str, Any]) -> Any:
                 return processor.execute_action(name, arguments)
 
+        if runs:
+            description = (
+                "Start one explicitly permitted, named SignalDeck action. "
+                "The action may execute a configured Cmd command or start a "
+                "SignalDeck script. Only the public action name and tightly "
+                "restricted arguments are accepted; raw Cmd commands and "
+                "script source are NEVER accepted. The response confirms "
+                "scheduling, not successful completion of an asynchronous "
+                "command or script. Actions available:\\n"
+            )
+            description += "\\n".join(
+                "- " + item["name"] + ": " + item["description"]
+                + " (arguments schema: " + json.dumps(item["parameters"], ensure_ascii=False) + ")"
+                for item in runs
+            )
+            @mcp.tool(name="run", description=description)
+            def run(
+                name: str,
+                arguments: dict[str, Any] | None = None,
+            ) -> dict[str, str]:
+                """Start a permitted named action; returns status=scheduled or raises.
+
+                name is the configured public alias, NOT a Cmd command or script.
+                arguments must match the alias-specific JSON schema, if any.
+                """
+                return processor.run_named_action(name, arguments)
+
     def tool_catalog(self) -> list[dict[str, Any]]:
         """Expose the actual FastMCP registry, including its generated schemas."""
         return [
@@ -161,7 +189,7 @@ class MCPRuntime:
                 "description": tool.description or "",
                 "input_schema": tool.parameters,
                 "output_schema": tool.output_schema,
-                "is_action": tool.name == "execute_action",
+                "is_action": tool.name in {"execute_action", "run"},
             }
             for tool in self.mcp._tool_manager.list_tools()
         ]
