@@ -87,9 +87,9 @@ class MCPRuntime:
         if history:
             description = (
                 "Read historical measurements for an explicit calendar date "
-                "(YYYY-MM-DD). date is REQUIRED and is the inclusive END date. "
+                "(YYYY-MM-DD). date is REQUIRED and is the inclusive START date. "
                 "days=1 reads that calendar day; days=N reads that day and the "
-                "preceding N-1 days, subject to the configured max_days. "
+                "following N-1 days, subject to the configured max_days. "
                 "This is NOT the offset argument of SignalDeck PersistData.hist: "
                 "the adapter selects each day with hist(date=..., days=0, "
                 "fullDay=True). By DEFAULT (include_points=false), the tool "
@@ -113,15 +113,15 @@ class MCPRuntime:
                 )],
                 date: Annotated[str, Field(
                     description=(
-                        "Required calendar date YYYY-MM-DD, inclusive END "
+                        "Required calendar date YYYY-MM-DD, inclusive START "
                         "date of the selected history window. For example "
-                        "2026-10-20 with days=2 selects October 19 and 20."
+                        "2026-10-20 with days=2 selects October 20 and 21."
                     ),
                     pattern=r"^\d{4}-\d{2}-\d{2}$",
                 )],
                 days: Annotated[int, Field(
                     description=(
-                        "Number of calendar days ending on the selected "
+                        "Number of calendar days starting on the selected "
                         "date, including the date itself (default 1). "
                         "NOT a relative offset from today."
                     ),
