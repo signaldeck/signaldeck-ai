@@ -18,7 +18,7 @@
     const approvalText = root.querySelector(".sdai-approval-text");
     const form = root.querySelector(".sdai-form");
     let connectionId = null, busy = false, remoteBusy = false, interrupt = null;
-    let lastMessages = null, lastThread = null, refreshing = false;
+    let lastMessages = null, refreshing = false;
 
     function render(role, value) {
       const node = document.createElement("div");
@@ -32,7 +32,7 @@
     function updateUI() {
       const connected = Boolean(connectionId);
       connect.textContent = connected ? "Trennen" : "Verbinden";
-      connect.disabled = busy;
+      connect.disabled = busy || remoteBusy;
       tokenField.hidden = connected;
       tokenField.disabled = connected || busy;
       field.disabled = !connected || busy || remoteBusy || Boolean(interrupt);
