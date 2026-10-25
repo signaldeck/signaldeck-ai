@@ -124,6 +124,18 @@ the permitted `max_days`.
 Use `mode=range` for exported methods that already support
 `days=N` to return a complete range.
 
+History entries always use ISO 8601 date/time strings (for example,
+`2026-10-23T09:10:00+00:00`) rather than synthetic `day-0` labels.
+Actual timestamps from a Pandas Series or timestamp-indexed mapping are
+preserved, including timezone information. A date-only index becomes a
+midnight datetime with `time_inferred: true`. The DummyData mock returns
+only one calculated scalar per day, so the MCP server assigns an
+**approximate UTC timestamp** at the query time minus that day offset and
+sets `time_inferred: true`. These mock timestamps are not real measurement
+instants. Untimestamped multi-value sequences and scalar results in
+`mode=range` now fail clearly instead of manufacturing index labels.
+
+
 ### Actions
 
 Actions are optional and configured exclusively through
