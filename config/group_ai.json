@@ -34,5 +34,14 @@
     "value": [
       "haussteuerung"
     ]
+  },
+  {
+    "name": "LLM-Skript testen",
+    "element": "Skripte / LLM-Test",
+    "type": "script",
+    "fa": "fas fa-terminal",
+    "value": [
+      "demo_llm"
+    ]
   }
 ]
