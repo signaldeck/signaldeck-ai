@@ -21,6 +21,10 @@ class Provider:
     def getMethodValue(self, name, *args, **kwargs):
         self.calls.append(("getMethodValue", name, kwargs))
         if name == "history_export":
+            if "date" not in kwargs:
+                # The same exported method can also be mapped as a read-only
+                # value with unrelated, explicit args/params.
+                return {"2026-10-24": 20.0}
             assert kwargs.get("days") == 0
             assert kwargs.get("fullDay") is True
             requested = kwargs["date"].date()
