@@ -1,6 +1,7 @@
 """One explicit, configuration-bounded MCP endpoint per SignalDeck processor."""
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 from typing import Any
@@ -108,6 +109,43 @@ class MCPRuntime:
             @mcp.tool(name="execute_action", description=description)
             def execute_action(name: str, arguments: dict[str, Any]) -> Any:
                 return processor.execute_action(name, arguments)
+
+    def tool_catalog(self) -> list[dict[str, Any]]:
+        """Expose the actual FastMCP registry, including its generated schemas."""
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description or "",
+                "input_schema": tool.parameters,
+                "output_schema": tool.output_schema,
+                "is_action": tool.name == "execute_action",
+            }
+            for tool in self.mcp._tool_manager.list_tools()
+        ]
+
+    def call_registered_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        """Use the very same FastMCP handlers as an external MCP client.
+
+        Called from the synchronous Flask /run action handler. A separate event
+        loop is safe here; no MCP HTTP listener or cli-agent is required.
+        """
+        if not isinstance(name, str) or not isinstance(arguments, dict):
+            raise ValueError("Tool name and JSON object arguments are required")
+        catalog = {item["name"]: item for item in self.tool_catalog()}
+        if name not in catalog:
+            raise ValueError("Unknown or unavailable MCP tool")
+        Draft202012Validator(catalog[name]["input_schema"]).validate(arguments)
+        result = asyncio.run(self.mcp.call_tool(name, arguments))
+        # FastMCP may return either structured JSON or MCP content blocks.
+        if isinstance(result, dict):
+            return result
+        if isinstance(result, (list, tuple)):
+            return [
+                item.model_dump(mode="json", exclude_none=True)
+                if hasattr(item, "model_dump") else item
+                for item in result
+            ]
+        raise TypeError("Unsupported FastMCP tool result")
 
     def start(self) -> None:
         if self.thread is not None:
