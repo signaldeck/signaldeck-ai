@@ -57,10 +57,11 @@ def config():
 
 
 def send(ctx, room="haus", event_id="e1", prompt="Wie warm?", source="socketio.ai"):
-    ctx.message(
-        source, prompt, metadata={"room": room, "event_id": event_id,
-                                  "transmitter": "family-user"},
-    )
+    ctx.message_bus.publish(SimpleNamespace(
+        source=source, content=prompt,
+        metadata={"room": room, "event_id": event_id,
+                  "transmitter": "family-user"},
+    ))
 
 
 def wait_for(predicate, seconds=3):
