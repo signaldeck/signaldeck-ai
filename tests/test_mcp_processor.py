@@ -82,11 +82,12 @@ def test_histories_iterate_days_and_reject_excessive_range():
     processor, provider = make_processor()
     result = processor.read_history("keller_hist", date="2026-10-24", days=2, include_points=True)
     assert result["statistics"]["count"] == 2
-    assert result["statistics"]["maximum"] == 24
+    assert result["statistics"]["maximum"] == 25
     assert result["date"] == "2026-10-24"
-    assert result["start_date"] == "2026-10-23"
+    assert result["start_date"] == "2026-10-24"
+    assert result["end_date"] == "2026-10-25"
     assert all(item[2].get("days") == 0 and item[2].get("fullDay") is True for item in provider.calls if item[0] == "getMethodValue")
-    assert {item[2]["date"].date().isoformat() for item in provider.calls if item[0] == "getMethodValue"} == {"2026-10-23", "2026-10-24"}
+    assert {item[2]["date"].date().isoformat() for item in provider.calls if item[0] == "getMethodValue"} == {"2026-10-24", "2026-10-25"}
     with pytest.raises(ValueError):
         processor.read_history("keller_hist", date="2026-10-24", days=3)
     with pytest.raises(ValueError):
@@ -211,10 +212,33 @@ def test_get_history_rejects_invalid_or_unbounded_dates(date, days):
     assert provider.calls == []
 
 
-def test_get_history_queries_leap_day_and_month_boundary_without_offset():
+def test_get_history_queries_forward_across_month_boundary_without_offset():
     processor, provider = make_processor()
     history = processor.read_history("keller_hist", date="2024-03-01", days=2,
                                      include_points=True)
-    assert history["start_date"] == "2024-02-29"
-    assert [row["time"][:10] for row in history["points"]] == ["2024-02-29", "2024-03-01"]
+    assert history["start_date"] == "2024-03-01"
+    assert history["end_date"] == "2024-03-02"
+    assert [row["time"][:10] for row in history["points"]] == ["2024-03-01", "2024-03-02"]
     assert all(call[2]["days"] == 0 for call in provider.calls)
+
+
+def test_get_history_queries_leap_day_as_second_day():
+    processor, provider = make_processor()
+    history = processor.read_history(
+        "keller_hist", date="2024-02-28", days=2, include_points=True
+    )
+    assert history["start_date"] == "2024-02-28"
+    assert history["end_date"] == "2024-02-29"
+    assert [row["time"][:10] for row in history["points"]] == [
+        "2024-02-28", "2024-02-29",
+    ]
+    assert all(call[2]["days"] == 0 for call in provider.calls)
+
+
+def test_get_history_rejects_future_end_of_window_without_provider_reads():
+    processor, provider = make_processor()
+    from datetime import datetime
+    today = datetime.now().date().isoformat()
+    with pytest.raises(ValueError, match="Future"):
+        processor.read_history("keller_hist", date=today, days=2)
+    assert provider.calls == []
