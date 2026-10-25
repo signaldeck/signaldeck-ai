@@ -296,8 +296,14 @@ def test_cache_is_not_queried_for_historical_day_or_range_provider():
 
     processor.history_specs["keller_hist"]["mode"] = "range"
     provider.calls.clear()
+    # Custom range methods consume date+days directly (not days=0).
+    provider.getMethodValue = lambda name, *args, **kwargs: (
+        provider.calls.append(("getMethodValue", name, kwargs))
+        or {yesterday + "T12:00:00": 20.0}
+    )
     processor.read_history("keller_hist", date=yesterday, days=1)
     assert not any(c[2].get("currentValues") for c in provider.calls)
+    assert provider.calls[0][2]["days"] == 1
 
 
 def test_unavailable_or_scalar_cache_does_not_change_persisted_history():
