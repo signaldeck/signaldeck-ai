@@ -1,16 +1,29 @@
 [
   {
+    "name": "Simulierte Temperaturen",
+    "element": "Dummy Temperaturwerte",
+    "type": "dummy_temperature",
+    "fa": "fas fa-thermometer-half",
+    "value": [
+      "overview"
+    ]
+  },
+  {
     "name": "MCP-Server",
     "element": "MCP Climate",
     "type": "mcp_climate",
     "fa": "fas fa-server",
-    "value": ["overview"]
+    "value": [
+      "overview"
+    ]
   },
   {
     "name": "Agenten-Chat",
     "element": "AG-UI Chat",
     "type": "agui",
     "fa": "fas fa-comments",
-    "value": ["chat"]
+    "value": [
+      "chat"
+    ]
   }
 ]
