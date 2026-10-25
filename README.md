@@ -76,6 +76,67 @@ the script. The answer appears in the Script View's command output
 the AI processor, the LLM command is expected to fail. The script is
 only a developer test; it does not modify real devices.
 
+## Optional Socket.IO @haus one-shot bridge (v2)
+
+The AI processor can optionally listen for **pre-filtered inbound** Socket.IO
+events on the SignalDeck MessageBus. The Socket.IO plugin's
+`incoming_message_routes` publishes only configured text commands after
+normal client validation; the AI plugin has no direct Socket.IO dependency.
+
+```json
+{
+  "socketio_bridge": {
+    "routes": [
+      {"room": "haus", "source": "socketio.ai",
+       "response_source": "ai.socketio.haus"}
+    ],
+    "max_queue": 5,
+    "timeout_seconds": 120
+  }
+}
+```
+
+This configuration belongs in the `AGUIChatProcessor.config`. The Socket.IO
+plugin must configure its corresponding inbound route:
+
+```json
+{"incoming_message_routes": [
+  {"rooms": ["haus"], "type": "chat",
+   "prefix": "@haus", "source": "socketio.ai"}
+ ],
+ "message_routes": [
+  {"source": "ai.socketio.haus", "rooms": ["haus"]}
+ ]}
+```
+
+An incoming cleartext message `@haus Wie warm ist es?` is transformed by
+the Socket.IO plugin into a MessageBus message containing only
+`Wie warm ist es?`, its originating room, sender information and event ID.
+
+The AI bridge queues the request on a dedicated worker (never blocking
+Socket.IO), borrows the API token from an authenticated Chat view of
+**this** AI processor, and runs a fresh one-shot AG-UI thread via the same
+transport as the existing `LLM` Cmd. Each thread is deleted in
+`finally` after the response or error; no room conversation history or
+additional permanent cli-agent session is created. Only one request
+executes at once; subsequent requests are bounded by `max_queue`. Duplicate
+room/event IDs are ignored. Replies and safe error messages are published
+with the configured `response_source` and routed by Socket.IO into the
+original room. The bridge unsubscribes on shutdown.
+
+Socket.IO encryption remains end-to-end and opaque: encrypted payloads
+without a matching cleartext `@haus` prefix never reach this bridge.
+Do not provide room keys to SignalDeck or cli-agent.
+
+The AI demo config includes the optional bridge settings but its Docker
+image does **not** install the Socket.IO plugin. To test the full flow,
+install both plugins into the same SignalDeck instance, merge the room
+routes into its Socket.IO processor, and manually connect an AI Chat
+view using a cli-agent bearer token first. Interactive tool approvals
+are not granted automatically. Limit the agent's configured tools to
+suitably trusted room participants; Socket.IO client `id` alone is not
+strong authentication.
+
 ## Optional one-shot LLM Cmd
 
 Each `AGUIChatProcessor` can register a separate SignalDeck command.
