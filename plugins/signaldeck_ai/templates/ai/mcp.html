@@ -12,7 +12,7 @@
         <p><strong>JSON-Eingabeschema</strong></p><pre class="sdai-mcp-schema">{{ tool.input_schema|tojson(indent=2) }}</pre>
         {% if tool.output_schema %}<details><summary>JSON-Ausgabeschema</summary><pre>{{ tool.output_schema|tojson(indent=2) }}</pre></details>{% endif %}
         <label class="sdai-mcp-args-label">Aufrufargumente (JSON)
-          <textarea class="sdai-mcp-args" spellcheck="false" rows="5">{% if tool.name == "get_values" %}{"fields":["temp_garten"]}{% elif tool.name == "get_history" %}{"name":"hist_temp_garten","days":7,"include_points":true}{% elif tool.name == "execute_action" %}{"name":"set_temp_garten","arguments":{"temp_garten":23.5}}{% else %}{}{% endif %}</textarea>
+          <textarea class="sdai-mcp-args" spellcheck="false" rows="5">{{ tool.example_args|tojson(indent=2) }}</textarea>
         </label>
         {% if tool.is_action %}<label class="sdai-mcp-confirm-label"><input type="checkbox" class="sdai-mcp-confirm"> Ich möchte diese Schreibaktion wirklich ausführen.</label>{% endif %}
         <div class="sdai-mcp-buttons"><button type="button" class="sdai-mcp-execute">Tool ausführen</button> <span class="sdai-mcp-feedback" role="status"></span></div>
