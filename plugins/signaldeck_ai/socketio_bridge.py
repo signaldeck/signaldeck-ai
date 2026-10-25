@@ -56,6 +56,8 @@ class SocketIOChatBridge:
 
         self.ctx = ctx
         self.runtime = runtime
+        # One active run plus exactly max_queue waiting requests.
+        self._slots = threading.BoundedSemaphore(max_queue + 1)
         self._queue: queue.Queue[tuple[str, str, str]] = queue.Queue(maxsize=max_queue + 1)
         self._stopped = threading.Event()
         self._guard = threading.RLock()
@@ -100,9 +102,17 @@ class SocketIOChatBridge:
             self._seen_order.append(key)
             while len(self._seen_order) > 1024:
                 self._seen.discard(self._seen_order.popleft())
+            if not self._slots.acquire(blocking=False):
+                self._publish(
+                    response_source,
+                    "Der Haus-Assistent ist ausgelastet. Bitte später erneut versuchen.",
+                    room,
+                )
+                return
             try:
                 self._queue.put_nowait((response_source, room, prompt))
             except queue.Full:
+                self._slots.release()
                 self._publish(
                     response_source,
                     "Der Haus-Assistent ist ausgelastet. Bitte später erneut versuchen.",
@@ -137,6 +147,7 @@ class SocketIOChatBridge:
                     self._publish(response_source, answer, room)
             finally:
                 self._queue.task_done()
+                self._slots.release()
 
     def shutdown(self) -> None:
         with self._guard:
