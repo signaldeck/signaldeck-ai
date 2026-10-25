@@ -79,14 +79,15 @@ def series_points(
     day: int,
     reference_time: datetime | None = None,
     allow_scalar: bool = True,
+    sample_date: date | None = None,
 ) -> list[dict[str, Any]]:
     """Convert ValueProvider history into properly timestamped points.
 
     - A timestamp-indexed Pandas Series or mapping keeps the original times.
     - A sequence must carry timestamps, as (time, value) or {time, value}.
-    - DummyData.hist returns one synthetic scalar per requested day. For
-      that *specific* per-day contract, approximate the sample instant as
-      query_time - day_offset; flag this synthesized time explicitly.
+    - Scalar daily history values have no real measurement timestamps.
+      With sample_date, use an inferred midnight for the requested day;
+      otherwise preserve the older UTC anchor minus day offset.
     - Never fabricate timestamps for a naked multi-value sequence.
     """
     if value is None:
@@ -123,6 +124,12 @@ def series_points(
         raise ValueError("History result does not contain timestamped data")
     # Per-day scalar is an estimated daily sample, not an actual measurement
     # timestamp. Work in UTC so daylight saving transitions cannot shift it.
+    if sample_date is not None:
+        return [{
+            "time": datetime.combine(sample_date, time.min).isoformat(),
+            "value": json_safe(value),
+            "time_inferred": True,
+        }]
     anchor = reference_time if reference_time is not None else datetime.now(timezone.utc)
     if anchor.tzinfo is None or anchor.utcoffset() is None:
         raise ValueError("reference_time must be timezone-aware")
