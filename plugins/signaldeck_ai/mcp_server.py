@@ -117,7 +117,7 @@ class MCPRuntime:
                         "date of the selected history window. For example "
                         "2026-10-20 with days=2 selects October 19 and 20."
                     ),
-                    pattern=r"^\\d{4}-\\d{2}-\\d{2}$",
+                    pattern=r"^\d{4}-\d{2}-\d{2}$",
                 )],
                 days: Annotated[int, Field(
                     description=(
