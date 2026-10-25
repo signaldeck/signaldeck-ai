@@ -226,3 +226,99 @@ def test_native_reset_history_action_returns_ack_without_rerender(monkeypatch):
     assert reply == {"ok": True, "history_reset": True}
     assert calls == ["opaque"]
     assert "html" not in reply
+
+
+def test_shared_value_reuses_thread_and_restores_history_between_views():
+    import time
+    requests_payload = []
+
+    def events(body):
+        requests_payload.append(body)
+        return [
+            {"type": "RUN_STARTED"},
+            {"type": "TEXT_MESSAGE_START", "messageId": "a", "role": "assistant"},
+            {"type": "TEXT_MESSAGE_CONTENT", "messageId": "a", "delta": "Antwort"},
+            {"type": "TEXT_MESSAGE_END", "messageId": "a"},
+            {"type": "RUN_FINISHED", "outcome": {"type": "success"}},
+        ]
+
+    factory, _ = make_client(events)
+    runtime = ChatRuntime(
+        "http://127.0.0.1:8765/ag-ui", http_client_factory=factory,
+    )
+    first = runtime.verify_and_connect("test-secret", "energie")
+    other = runtime.verify_and_connect("test-secret", "haussteuerung")
+    assert first != other
+    assert runtime.verify_and_connect("test-secret", "energie") == first
+
+    run_id = runtime.start_message(first, "Stromverbrauch?")
+    await_run(runtime.get_run(first, run_id))
+    for attempt in range(100):
+        snapshot = runtime.view_state("energie")
+        if not snapshot["busy"]:
+            break
+        time.sleep(0.01)
+    assert snapshot["connected"]
+    assert snapshot["connection_id"] == first
+    assert snapshot["messages"] == [
+        {"role": "user", "content": "Stromverbrauch?"},
+        {"role": "assistant", "content": "Antwort"},
+    ]
+    assert runtime.view_state("haussteuerung")["messages"] == []
+    assert runtime.view_state("unconfigured")["connected"] is False
+    assert requests_payload[0]["threadId"] != runtime._connections[other].thread_id
+
+    runtime.new_chat(first)
+    assert runtime.view_state("energie")["messages"] == []
+    assert runtime.view_state("energie")["connected"]
+    assert runtime.view_state("haussteuerung")["connected"]
+    runtime.disconnect(first)
+    assert runtime.view_state("energie")["connected"] is False
+    assert runtime.view_state("haussteuerung")["connected"] is True
+    runtime.shutdown()
+
+
+def test_native_view_state_restoration_and_cross_value_rejection():
+    factory, _ = make_client(lambda _: [
+        {"type": "RUN_STARTED"},
+        {"type": "RUN_FINISHED", "outcome": {"type": "success"}},
+    ])
+    processor = make_processor()
+    processor.runtime = ChatRuntime(
+        "http://127.0.0.1:8765/ag-ui", http_client_factory=factory,
+    )
+    app = Flask(__name__)
+    with app.test_request_context(
+        "/run", method="POST", headers={"Origin": "http://localhost"},
+    ):
+        initial = processor.process("energie", "hash", ai_action="state")
+        assert initial == {"ok": True, "connected": False, "messages": [], "busy": False}
+        connected = processor.process(
+            "energie", "hash", ai_action="connect", token="test-secret",
+        )
+        assert connected["ok"]
+        identifier = connected["connection_id"]
+        reopened = processor.process("energie", "hash", ai_action="state")
+        assert reopened["connection_id"] == identifier
+        cross_view = processor.process(
+            "haussteuerung", "other-hash", ai_action="send",
+            connection_id=identifier, message="Cross-view",
+        )
+        assert cross_view["ok"] is False
+        assert "anderen Chat-View" in cross_view["error"]
+        reset = processor.process(
+            "energie", "hash", ai_action="reset_history", connection_id=identifier,
+        )
+        assert reset == {"ok": True, "history_reset": True}
+    processor.shutdown()
+
+
+@pytest.mark.parametrize("bad", ["", [], ["a", "b"], None, 2, " "])
+def test_invalid_view_values_are_rejected(bad):
+    with pytest.raises(ChatActionError):
+        ChatRuntime.normalize_view(bad)
+
+
+def test_same_value_in_state_list_and_action_scalar():
+    assert ChatRuntime.normalize_view(["energie"]) == "energie"
+    assert ChatRuntime.normalize_view("energie") == "energie"
