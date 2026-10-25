@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir \
     "uvicorn>=0.35,<1" \
     "httpx>=0.27,<1" \
     "jsonschema>=4.26,<5" \
+    && pip install --no-cache-dir --no-deps \
+        "git+https://github.com/signaldeck/signaldeck-plugin-main.git@feature/dummy-history-series" \
     && pip install --no-cache-dir --no-deps .
 
 ENV PYTHONPATH=/plugins
