@@ -309,6 +309,41 @@
       "name": "script",
       "class": "signaldeck_plugin_main.processors.script.script_processor.ScriptProcessor",
       "config": {}
+    },
+    {
+      "name": "socketio",
+      "class": "signaldeck_plugin_socketio.processor.SocketIOProcessor",
+      "config": {
+        "cors_allowed_origins": "*",
+        "ping_interval": 25,
+        "ping_timeout": 20,
+        "max_http_buffer_size": 1000000,
+        "rooms": [
+          {
+            "name": "haus",
+            "display_name": "Haus / KI-Demo",
+            "persist": false
+          }
+        ],
+        "incoming_message_routes": [
+          {
+            "rooms": [
+              "haus"
+            ],
+            "type": "chat",
+            "prefix": "@haus",
+            "source": "socketio.ai"
+          }
+        ],
+        "message_routes": [
+          {
+            "source": "ai.socketio.haus",
+            "rooms": [
+              "haus"
+            ]
+          }
+        ]
+      }
     }
   ],
   "groups": [
