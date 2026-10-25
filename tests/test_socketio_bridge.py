@@ -177,3 +177,33 @@ def test_bad_config_fails_closed_before_subscribing():
         with pytest.raises(ValueError):
             SocketIOChatBridge(bad, ctx, rt)
     assert ctx.message_bus.listeners == []
+
+
+def test_zero_queue_rejects_parallel_requests_without_second_session():
+    ctx, rt = Context(), runtime()
+    cfg = config()
+    cfg["max_queue"] = 0
+    active = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    async def ask(prompt, token):
+        calls.append(prompt)
+        active.set()
+        await asyncio.to_thread(release.wait, 2)
+        return "Fertig"
+
+    bridge = SocketIOChatBridge(cfg, ctx, rt, ask=ask)
+    try:
+        send(ctx, prompt="erste Frage", event_id="1")
+        assert active.wait(2)
+        send(ctx, prompt="zweite Frage", event_id="2")
+        wait_for(lambda: len(ctx.sent) >= 1)
+        assert "ausgelastet" in ctx.sent[0][1]
+        assert calls == ["erste Frage"]
+        release.set()
+        wait_for(lambda: len(ctx.sent) == 2)
+        assert ctx.sent[1][1] == "Fertig"
+    finally:
+        release.set()
+        bridge.shutdown()
