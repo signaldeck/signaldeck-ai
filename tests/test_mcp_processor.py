@@ -141,3 +141,51 @@ def test_mcp_value_method_binding_preserves_config_args_and_params():
         and call[2].get("mode") == "summary"
         for call in provider.calls
     )
+
+
+def test_selected_values_only_read_requested_aliases():
+    processor, provider = make_processor()
+    processor.config["values"].append({
+        "type": "field", "name": "garten", "from": "garden_export"
+    })
+    processor.config["mcp_data"]["values"].append({
+        "field": "garten", "description": "Temperature in garden"
+    })
+    import logging
+    processor = MCPServerProcessor(
+        "mcp_climate", processor.config,
+        SimpleNamespace(logger=logging.getLogger("tests")), provider, False,
+    )
+    result = processor.read_values(fields=["garten"])
+    assert list(result) == ["garten"]
+    assert provider.calls == [("getValue", "garden_export")]
+    assert set(processor.read_values().keys()) == {"garten", "keller"}
+
+
+def test_selected_values_reject_invalid_fields_before_any_read():
+    processor, provider = make_processor()
+    with pytest.raises(ValueError):
+        processor.read_values(fields=["keller", "hidden"])
+    with pytest.raises(ValueError):
+        processor.read_values(fields="keller")
+    assert provider.calls == []
+
+
+def test_mcp_server_instructions_are_loaded_from_config():
+    from signaldeck_ai.mcp_server import MCPRuntime
+    processor, _ = make_processor()
+    processor.config["mcp"] = {
+        "port": 8766,
+        "instructions": "Nutze Messwerte zur Beantwortung von Energiefragen."
+    }
+    runtime = MCPRuntime(processor)
+    assert runtime.instructions == "Nutze Messwerte zur Beantwortung von Energiefragen."
+    assert runtime.mcp.instructions == runtime.instructions
+
+
+def test_mcp_server_rejects_non_string_instructions():
+    from signaldeck_ai.mcp_server import MCPRuntime
+    processor, _ = make_processor()
+    processor.config["mcp"] = {"instructions": ["not", "text"]}
+    with pytest.raises(ValueError, match="instructions"):
+        MCPRuntime(processor)
