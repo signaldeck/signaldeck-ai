@@ -1,6 +1,9 @@
 {
   "page_title": "SignalDeck AI",
-  "i18n": {"lang": "de", "lang_fallback": "en"},
+  "i18n": {
+    "lang": "de",
+    "lang_fallback": "en"
+  },
   "processors": [
     {
       "name": "mcp_climate",
@@ -12,7 +15,11 @@
           "port": 8766
         },
         "values": [],
-        "methods": []
+        "methods": [],
+        "mcp_data": {
+          "values": [],
+          "data_rows": []
+        }
       }
     },
     {
@@ -29,5 +36,8 @@
       "data": "/config/group_ai.json"
     }
   ],
-  "cmd": {"alias": [], "script": []}
+  "cmd": {
+    "alias": [],
+    "script": []
+  }
 }
