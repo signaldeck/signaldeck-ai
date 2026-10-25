@@ -19,6 +19,90 @@
     const form = root.querySelector(".sdai-form");
     let connectionId = null, busy = false, remoteBusy = false, interrupt = null;
     let lastMessages = null, refreshing = false;
+    // Tool entries are display-only. They never contain arguments or results.
+    const toolGroups = new Map();
+    const statusText = {
+      running: "Läuft", success: "Erfolgreich", error: "Fehler",
+      denied: "Abgelehnt", approval: "Freigabe erforderlich",
+      finished: "Beendet"
+    };
+    function clearTranscript() {
+      transcript.replaceChildren();
+      toolGroups.clear();
+    }
+
+    function renderToolGroup(group, live = false) {
+      if (!group || !Array.isArray(group.tools) || !group.tools.length) return null;
+      const details = document.createElement("details");
+      details.className = "sdai-tool-group";
+      details.dataset.runId = group.id || "";
+      details.open = live;
+      const heading = document.createElement("summary");
+      heading.textContent = "Tool-Aufrufe (" + group.tools.length + ")";
+      details.appendChild(heading);
+      const list = document.createElement("ul");
+      list.className = "sdai-tool-list";
+      details.appendChild(list);
+      transcript.appendChild(details);
+      if (group.id) toolGroups.set(group.id, {details, heading, list});
+      for (const tool of group.tools) renderToolItem(list, tool);
+      transcript.scrollTop = transcript.scrollHeight;
+      return details;
+    }
+
+    function renderToolItem(list, tool) {
+      const entry = document.createElement("li");
+      entry.className = "sdai-tool-entry";
+      entry.dataset.callId = tool.id || "";
+      const name = document.createElement("span");
+      name.className = "sdai-tool-name";
+      name.textContent = tool.name || "Unbekanntes Tool";
+      const state = document.createElement("span");
+      state.className = "sdai-tool-status";
+      state.textContent = statusText[tool.status] || "Beendet";
+      entry.append(name, state);
+      list.appendChild(entry);
+    }
+
+    function liveToolStart(runId, callId, name) {
+      if (!callId) return;
+      let group = toolGroups.get(runId);
+      if (!group) {
+        const details = document.createElement("details");
+        details.className = "sdai-tool-group";
+        details.open = true;
+        details.dataset.runId = runId;
+        const heading = document.createElement("summary");
+        details.appendChild(heading);
+        const list = document.createElement("ul");
+        list.className = "sdai-tool-list";
+        details.appendChild(list);
+        transcript.appendChild(details);
+        group = {details, heading, list};
+        toolGroups.set(runId, group);
+      }
+      const existing = Array.from(group.list.children).find(
+        node => node.dataset.callId === callId
+      );
+      if (!existing) {
+        renderToolItem(group.list, {id: callId, name, status: "running"});
+      }
+      group.heading.textContent = "Tool-Aufrufe (" + group.list.children.length + ")";
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+
+    function liveToolStatus(callId, value) {
+      for (const group of toolGroups.values()) {
+        const entry = Array.from(group.list.children).find(
+          node => node.dataset.callId === callId
+        );
+        if (entry) {
+          entry.querySelector(".sdai-tool-status").textContent =
+            statusText[value] || "Beendet";
+          break;
+        }
+      }
+    }
 
     function render(role, value) {
       const node = document.createElement("div");
@@ -73,8 +157,20 @@
         const messages = state.messages || [];
         const serialized = JSON.stringify(messages);
         if (serialized !== lastMessages || previousConnection !== connectionId) {
-          transcript.replaceChildren();
-          for (const msg of messages) render(msg.role, msg.content);
+          const openGroups = new Set(
+            Array.from(toolGroups.entries())
+              .filter(([, group]) => group.details.open)
+              .map(([id]) => id)
+          );
+          clearTranscript();
+          for (const msg of messages) {
+            if (msg.role === "tools") {
+              const group = renderToolGroup(msg);
+              if (group && openGroups.has(msg.id)) group.open = true;
+            } else if (msg.role === "user" || msg.role === "assistant") {
+              render(msg.role, msg.content);
+            }
+          }
           lastMessages = serialized;
         }
         interrupt = state.pending_interrupt || null;
@@ -101,7 +197,7 @@
           await action("disconnect");
           connectionId = null;
           interrupt = null;
-          transcript.replaceChildren();
+          clearTranscript();
           lastMessages = null;
           approvals.hidden = true;
         } else {
@@ -136,7 +232,7 @@
         if (!result.history_reset) throw new Error("Zurücksetzen nicht bestätigt.");
         interrupt = null;
         approvals.hidden = true;
-        transcript.replaceChildren();
+        clearTranscript();
         lastMessages = null;
       } catch (err) {
         render("info", "Verlauf zurücksetzen: " + String(err.message || err));
@@ -178,7 +274,10 @@
             break;
           }
           case "TOOL_CALL_START":
-            render("info", "Tool: " + (evt.toolCallName || "unbekannt"));
+            liveToolStart(runId, evt.toolCallId, evt.toolCallName);
+            break;
+          case "TOOL_CALL_RESULT":
+            liveToolStatus(evt.toolCallId, evt.content);
             break;
           case "RUN_ERROR":
             render("info", "Agent-Fehler: " + (evt.message || "unbekannt"));
