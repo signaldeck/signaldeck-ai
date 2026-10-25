@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+from flask import request
+from jsonschema import ValidationError
 from threading import RLock
 from typing import Any
 
@@ -19,7 +21,8 @@ class MCPDisplayData(DisplayData):
         self.name = processor.name
         self.status = processor.runtime.status if processor.runtime else "pending"
         self.url = processor.runtime.url if processor.runtime else ""
-        self.tools = processor.tool_descriptions()
+        self.instructions = (processor.config.get("mcp", {}) or {}).get("instructions", "")
+        self.tools = processor.registered_tool_catalog()
 
 
 class MCPServerProcessor(DisplayProcessor):
@@ -231,6 +234,62 @@ class MCPServerProcessor(DisplayProcessor):
                 self._method_bindings[name]["from"], **arguments
             )
         return json_safe(result)
+
+    def registered_tool_catalog(self) -> list[dict[str, Any]]:
+        if self.runtime is None:
+            return []
+        return self.runtime.tool_catalog()
+
+    def process(self, value, actionHash, file=None, **params):
+        """Use the standard SignalDeck action dispatcher, without rerendering.
+
+        The independent diagnostic UI stays mounted while results are shown.
+        """
+        if request.method != "POST":
+            return {"ok": False, "error": "Nur POST-Anfragen sind erlaubt."}
+        if request.headers.get("Origin") != f"{request.scheme}://{request.host}":
+            return {"ok": False, "error": "Same-Origin-Anfrage erforderlich."}
+        if file is not None:
+            return {"ok": False, "error": "Dateiupload nicht erlaubt."}
+        try:
+            return {"ok": True, **self.performActions(value, actionHash, **params)}
+        except (ValueError, TypeError, ValidationError) as exc:
+            return {"ok": False, "error": str(exc)}
+        except Exception:
+            self.logger.exception("MCP diagnostic tool execution failed")
+            return {"ok": False, "error": "Fehler beim Aufruf des MCP-Tools."}
+
+    def performActions(self, value, actionHash, **kwargs):
+        if kwargs.get("mcp_action") != "execute_tool":
+            raise ValueError("Unbekannte MCP-Diagnoseaktion.")
+        if self.runtime is None:
+            raise ValueError("MCP-Server nicht initialisiert.")
+        tool_name = kwargs.get("tool_name")
+        payload = kwargs.get("arguments", "{}")
+        if not isinstance(tool_name, str) or not isinstance(payload, str):
+            raise ValueError("Toolname und JSON-Argumente erforderlich.")
+        if len(payload.encode("utf-8")) > 16_384:
+            raise ValueError("Tool-Argumente überschreiten 16 KiB.")
+        arguments = json.loads(payload)
+        if not isinstance(arguments, dict):
+            raise ValueError("Die Argumente müssen ein JSON-Objekt sein.")
+        available = {tool["name"]: tool for tool in self.registered_tool_catalog()}
+        if tool_name not in available:
+            raise ValueError("Unbekanntes oder nicht freigegebenes MCP-Tool.")
+        if available[tool_name]["is_action"]:
+            if kwargs.get("confirm_write") != "true":
+                raise ValueError("Schreibaktion muss ausdrücklich bestätigt werden.")
+        result = self.runtime.call_registered_tool(tool_name, arguments)
+        return {"tool": tool_name, "result": json_safe(result)}
+
+    def getAdditionalJsFiles(self, value):
+        return [("signaldeck_ai", "js/mcp_console.js")]
+
+    def getAdditionalCssFiles(self, value):
+        return [("signaldeck_ai", "css/mcp_console.css")]
+
+    def getJS_functions_to_call_on_client(self, data):
+        return {f"signaldeck-ai-mcp-{data.hash}": "initSignalDeckMCPConsole"}
 
     def getTemplate(self, value):
         return "ai/mcp.html"
