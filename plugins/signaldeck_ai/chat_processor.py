@@ -7,6 +7,7 @@ from signaldeck_sdk import DisplayProcessor, DisplayData
 
 from .chat_runtime import ChatActionError, ChatRuntime
 from .llm_command import LLMCommand
+from .socketio_bridge import SocketIOChatBridge
 
 
 class ChatDisplayData(DisplayData):
@@ -40,7 +41,11 @@ class AGUIChatProcessor(DisplayProcessor):
             raise ValueError("AG-UI endpoint requires a TCP port")
         self.endpoint = endpoint if parsed.path == "/ag-ui" else endpoint + "/ag-ui"
         self.runtime = ChatRuntime(self.endpoint)
-        # A configured view value identifies one shared chat within this processor.
+        bridge = config.get("socketio_bridge")
+        self.socketio_bridge = (
+            SocketIOChatBridge(bridge, ctx, self.runtime)
+            if bridge is not None else None
+        )
 
     def registerCommands(self, cmd):
         config = self.config.get("cmd")
@@ -122,4 +127,6 @@ class AGUIChatProcessor(DisplayProcessor):
         raise ChatActionError("Unbekannte Chat-Aktion.")
 
     def shutdown(self):
+        if self.socketio_bridge is not None:
+            self.socketio_bridge.shutdown()
         self.runtime.shutdown()
