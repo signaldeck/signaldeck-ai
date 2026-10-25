@@ -26,6 +26,10 @@ class MCPRuntime:
         if self.port < 1024 or self.port > 65535:
             raise ValueError("MCP port must be between 1024 and 65535")
 
+        self.instructions = cfg.get("instructions", "")
+        if not isinstance(self.instructions, str):
+            raise ValueError("mcp.instructions must be a string")
+
         self.server = None
         self.thread: threading.Thread | None = None
         self.error: str | None = None
@@ -35,6 +39,7 @@ class MCPRuntime:
             port=self.port,
             stateless_http=True,
             json_response=True,
+            instructions=self.instructions,
         )
         self._register_tools()
 
@@ -64,9 +69,17 @@ class MCPRuntime:
             f"- {f['name']}: {f['description']}" for f in fields.values()
         ) or "(no values configured)"
 
-        @mcp.tool(name="get_values", description="Get permitted current SignalDeck values.\n" + descriptions)
-        def get_values() -> dict[str, Any]:
-            return processor.read_values()
+        if fields:
+            @mcp.tool(
+                name="get_values",
+                description=(
+                    "Read selected SignalDeck values by their configured names. "
+                    "Omit fields to read all published values. "
+                    "Never use source ValueProvider names.\n" + descriptions
+                ),
+            )
+            def get_values(fields: list[str] | None = None) -> dict[str, Any]:
+                return processor.read_values(fields)
 
         if history:
             description = "Fetch permitted SignalDeck history and compute exact statistics.\n"
