@@ -224,6 +224,31 @@ class ChatRuntime:
                 self._views[view_key] = identifier
             return identifier
 
+    def command_token(self) -> str:
+        """Borrow the login from an active Chat UI of this processor.
+
+        Different active tokens would make the target credentials ambiguous;
+        fail closed rather than picking a view or browser arbitrarily.
+        """
+        with self._lock:
+            self._expire_locked()
+            tokens = {
+                connection.token
+                for connection in self._connections.values()
+                if not connection.revoked and connection.view_key is not None
+            }
+            if not tokens:
+                raise ChatActionError(
+                    "LLM-Command nicht verfügbar: Zuerst in einer Chat-View "
+                    "dieses Prozessors mit cli-agent verbinden."
+                )
+            if len(tokens) != 1:
+                raise ChatActionError(
+                    "LLM-Command nicht verfügbar: Mehrere verschiedene "
+                    "API-Tokens in Chat-Views dieses Prozessors aktiv."
+                )
+            return next(iter(tokens))
+
     def contains(self, identifier: str) -> bool:
         with self._lock:
             try:
