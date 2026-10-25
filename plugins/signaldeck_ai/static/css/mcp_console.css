@@ -1,0 +1,23 @@
+.sdai-mcp{max-width:100%;min-width:0;padding:8px 0}
+.sdai-mcp-header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.sdai-mcp-header h3{margin:0 0 8px;font-size:1.1rem}
+.sdai-mcp-status{opacity:.8}
+.sdai-mcp-metadata{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 12px;margin:8px 0 12px}
+.sdai-mcp-metadata dt{font-weight:600}
+.sdai-mcp-metadata dd{margin:0;overflow-wrap:anywhere}
+.sdai-mcp-tool-list{display:flex;flex-direction:column;gap:10px}
+.sdai-mcp-tool{border:1px solid #8886;border-radius:8px;padding:10px;min-width:0}
+.sdai-mcp-tool>summary{cursor:pointer;overflow-wrap:anywhere}
+.sdai-mcp-tool-body{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.sdai-mcp-tool-body p{margin:0}
+.sdai-mcp-description{white-space:pre-wrap;overflow-wrap:anywhere}
+.sdai-mcp-tool pre,.sdai-mcp-instructions pre{max-height:280px;overflow:auto;padding:10px;border-radius:6px;border:1px solid #8884;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85em}
+.sdai-mcp-schema{margin:0}
+.sdai-mcp-args-label{display:flex;flex-direction:column;gap:5px;font-weight:600}
+.sdai-mcp-args{width:100%;min-height:85px;box-sizing:border-box;font:monospace;resize:vertical}
+.sdai-mcp-confirm-label{display:block;font-weight:600}
+.sdai-mcp-warning{font-size:.8em;background:#e5aa3140;padding:2px 5px;border-radius:3px}
+.sdai-mcp-buttons{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sdai-mcp-feedback{font-size:.9em}
+.sdai-mcp-result-box{margin-top:6px}
+.sdai-mcp-result{max-height:420px!important}
