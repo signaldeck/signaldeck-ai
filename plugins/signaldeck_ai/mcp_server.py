@@ -136,16 +136,19 @@ class MCPRuntime:
             raise ValueError("Unknown or unavailable MCP tool")
         Draft202012Validator(catalog[name]["input_schema"]).validate(arguments)
         result = asyncio.run(self.mcp.call_tool(name, arguments))
-        # FastMCP may return either structured JSON or MCP content blocks.
-        if isinstance(result, dict):
-            return result
-        if isinstance(result, (list, tuple)):
-            return [
-                item.model_dump(mode="json", exclude_none=True)
-                if hasattr(item, "model_dump") else item
-                for item in result
-            ]
-        raise TypeError("Unsupported FastMCP tool result")
+        # FastMCP returns either a dict, content blocks, or (blocks, structured
+        # output). Nested MCP content blocks are Pydantic objects, so convert
+        # the complete result recursively, not just top-level items.
+        def convert(value):
+            if hasattr(value, "model_dump"):
+                return value.model_dump(mode="json", exclude_none=True)
+            if isinstance(value, (tuple, list)):
+                return [convert(item) for item in value]
+            if isinstance(value, dict):
+                return {key: convert(item) for key, item in value.items()}
+            return value
+
+        return convert(result)
 
     def start(self) -> None:
         if self.thread is not None:
