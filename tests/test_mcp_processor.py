@@ -21,8 +21,10 @@ class Provider:
     def getMethodValue(self, name, *args, **kwargs):
         self.calls.append(("getMethodValue", name, kwargs))
         if name == "history_export":
-            days = kwargs.get("days", 0)
-            return {f"2026-10-{24-days:02d}": 20 + days}
+            assert kwargs.get("days") == 0
+            assert kwargs.get("fullDay") is True
+            requested = kwargs["date"].date()
+            return {requested.isoformat(): float(requested.day)}
         if name == "action_export":
             return {"ok": True, "setpoint": kwargs["setpoint"]}
         raise ValueError(name)
@@ -74,15 +76,17 @@ def test_mcp_reuses_value_provider_and_descriptions():
 
 def test_histories_iterate_days_and_reject_excessive_range():
     processor, provider = make_processor()
-    result = processor.read_history("keller_hist", days=2, include_points=True)
+    result = processor.read_history("keller_hist", date="2026-10-24", days=2, include_points=True)
     assert result["statistics"]["count"] == 2
-    assert result["statistics"]["maximum"] == 21
-    assert any(item[2].get("days") == 0 and item[2].get("fullDay") is True for item in provider.calls if item[0] == "getMethodValue")
-    assert any(item[2].get("days") == 1 and item[2].get("fullDay") is True for item in provider.calls if item[0] == "getMethodValue")
+    assert result["statistics"]["maximum"] == 24
+    assert result["date"] == "2026-10-24"
+    assert result["start_date"] == "2026-10-23"
+    assert all(item[2].get("days") == 0 and item[2].get("fullDay") is True for item in provider.calls if item[0] == "getMethodValue")
+    assert {item[2]["date"].date().isoformat() for item in provider.calls if item[0] == "getMethodValue"} == {"2026-10-23", "2026-10-24"}
     with pytest.raises(ValueError):
-        processor.read_history("keller_hist", days=3)
+        processor.read_history("keller_hist", date="2026-10-24", days=3)
     with pytest.raises(ValueError):
-        processor.read_history("unlisted", days=1)
+        processor.read_history("unlisted", date="2026-10-24", days=1)
 
 
 def test_actions_validate_parameters_before_provider_invocation():
@@ -189,3 +193,24 @@ def test_mcp_server_rejects_non_string_instructions():
     processor.config["mcp"] = {"instructions": ["not", "text"]}
     with pytest.raises(ValueError, match="instructions"):
         MCPRuntime(processor)
+
+
+@pytest.mark.parametrize("date,days", [
+    ("2026-02-30", 1), ("2026-10-24T12:00:00", 1),
+    ("2026-10-24", 0), ("2026-10-24", True), ("2026-10-24", 3),
+    ("2999-01-01", 1),
+])
+def test_get_history_rejects_invalid_or_unbounded_dates(date, days):
+    processor, provider = make_processor()
+    with pytest.raises(ValueError):
+        processor.read_history("keller_hist", date=date, days=days)
+    assert provider.calls == []
+
+
+def test_get_history_queries_leap_day_and_month_boundary_without_offset():
+    processor, provider = make_processor()
+    history = processor.read_history("keller_hist", date="2024-03-01", days=2,
+                                     include_points=True)
+    assert history["start_date"] == "2024-02-29"
+    assert [row["time"][:10] for row in history["points"]] == ["2024-02-29", "2024-03-01"]
+    assert all(call[2]["days"] == 0 for call in provider.calls)
