@@ -119,6 +119,7 @@
       } finally {
         busy = false;
         updateUI();
+        void syncState();
       }
     });
 
