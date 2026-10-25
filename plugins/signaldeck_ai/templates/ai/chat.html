@@ -1,0 +1,14 @@
+<section id="signaldeck-ai-chat-{{ displayData.hash }}" class="sdai-chat" data-endpoint="{{ displayData.api_base }}" data-actionhash="{{ displayData.hash }}">
+  <header class="sdai-header"><strong>AG-UI · {{ displayData.name }} / {{ displayData.view_key }}</strong><span class="sdai-status">Nicht verbunden</span></header>
+  <div class="sdai-auth"><label>cli-agent API-Token <input class="sdai-token" type="password" autocomplete="off" spellcheck="false" placeholder="Token nach Start von cli-agent-api eingeben"></label></div>
+  <div class="sdai-actions">
+    <button type="button" class="sdai-connect">Verbinden</button>
+    <button type="button" class="sdai-new" title="Konversation und Agenten-Thread zurücksetzen, ohne sich abzumelden" disabled>Verlauf zurücksetzen</button>
+  </div>
+  <div class="sdai-transcript" role="log" aria-live="polite"></div>
+  <form class="sdai-form">
+    <input class="sdai-input" type="text" aria-label="Nachricht" placeholder="Nachricht..." disabled maxlength="12000">
+    <button class="sdai-send" type="submit" disabled>Senden</button>
+  </form>
+  <div class="sdai-approval" hidden><p class="sdai-approval-text"></p><button type="button" data-decision="yes">Einmal zulassen</button><button type="button" data-decision="session">Für diese Session</button><button type="button" data-decision="no">Ablehnen</button></div>
+</section>

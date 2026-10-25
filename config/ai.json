@@ -1,0 +1,393 @@
+{
+  "page_title": "SignalDeck AI – Demo",
+  "i18n": {
+    "lang": "de",
+    "lang_fallback": "en"
+  },
+  "processors": [
+    {
+      "name": "dummy_temperature",
+      "class": "signaldeck_plugin_main.processors.dummy_data.data.Data",
+      "config": {
+        "vars": {
+          "float": [
+            "temp_garten",
+            "temp_wohnzimmer",
+            "temp_keller"
+          ]
+        },
+        "defaults": {
+          "temp_garten": 18.5,
+          "temp_wohnzimmer": 21.3,
+          "temp_keller": 17.8
+        },
+        "hist": {
+          "temp_garten": {
+            "type": "asc",
+            "perDay": 0.35,
+            "interval_minutes": 30,
+            "variation": 2
+          },
+          "temp_wohnzimmer": {
+            "type": "desc",
+            "perDay": 0.08,
+            "interval_minutes": 30,
+            "variation": 0.5
+          },
+          "temp_keller": {
+            "type": "asc",
+            "perDay": 0.03,
+            "interval_minutes": 30,
+            "variation": 0.2
+          }
+        },
+        "export": {
+          "values": [
+            {
+              "temperature_garten": "temp_garten"
+            },
+            {
+              "temperature_wohnzimmer": "temp_wohnzimmer"
+            },
+            {
+              "temperature_keller": "temp_keller"
+            }
+          ],
+          "methods": [
+            {
+              "name": "hist_temperature_garten",
+              "target_function": "hist",
+              "args": [
+                "temp_garten"
+              ]
+            },
+            {
+              "name": "hist_temperature_wohnzimmer",
+              "target_function": "hist",
+              "args": [
+                "temp_wohnzimmer"
+              ]
+            },
+            {
+              "name": "hist_temperature_keller",
+              "target_function": "hist",
+              "args": [
+                "temp_keller"
+              ]
+            },
+            {
+              "name": "set_mock_temp_garten",
+              "target_function": "performActions",
+              "args": [
+                [
+                  "demo"
+                ],
+                "mcp-mock"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "mcp_climate",
+      "class": "signaldeck_ai.mcp_processor.MCPServerProcessor",
+      "config": {
+        "mcp": {
+          "name": "signaldeck-climate-demo",
+          "host": "127.0.0.1",
+          "port": 8766,
+          "instructions": "Dieser MCP-Server liefert ausschließlich simulierte Temperaturwerte aus SignalDeck. get_values liest aktuelle Werte, get_history liefert synthetische tägliche historische Werte. Mit execute_action darf nur die simulierte Gartentemperatur verändert werden; echte Geräte sind nicht angebunden. Frage nur benötigte Felder ab. Für Steuerungsaktionen verwende ausschließlich run mit den konfigurierten öffentlichen Namen."
+        },
+        "values": [
+          {
+            "name": "temp_garten",
+            "type": "field",
+            "from": "temperature_garten"
+          },
+          {
+            "name": "temp_wohnzimmer",
+            "type": "field",
+            "from": "temperature_wohnzimmer"
+          },
+          {
+            "name": "temp_keller",
+            "type": "field",
+            "from": "temperature_keller"
+          }
+        ],
+        "methods": [
+          {
+            "name": "hist_temp_garten",
+            "from": "hist_temperature_garten"
+          },
+          {
+            "name": "hist_temp_wohnzimmer",
+            "from": "hist_temperature_wohnzimmer"
+          },
+          {
+            "name": "hist_temp_keller",
+            "from": "hist_temperature_keller"
+          },
+          {
+            "name": "set_temp_garten",
+            "from": "set_mock_temp_garten"
+          }
+        ],
+        "mcp_data": {
+          "values": [
+            {
+              "field": "temp_garten",
+              "description": "Aktuelle simulierte Temperatur im Garten",
+              "unit": "°C"
+            },
+            {
+              "field": "temp_wohnzimmer",
+              "description": "Aktuelle simulierte Temperatur im Wohnzimmer",
+              "unit": "°C"
+            },
+            {
+              "field": "temp_keller",
+              "description": "Aktuelle simulierte Temperatur im Keller",
+              "unit": "°C"
+            }
+          ],
+          "data_rows": [
+            {
+              "func": "hist_temp_garten",
+              "description": "Simulierter täglicher Temperaturverlauf im Garten",
+              "unit": "°C",
+              "max_days": 30
+            },
+            {
+              "func": "hist_temp_wohnzimmer",
+              "description": "Simulierter täglicher Temperaturverlauf im Wohnzimmer",
+              "unit": "°C",
+              "max_days": 30
+            },
+            {
+              "func": "hist_temp_keller",
+              "description": "Simulierter täglicher Temperaturverlauf im Keller",
+              "unit": "°C",
+              "max_days": 30
+            }
+          ],
+          "actions": [
+            {
+              "func": "set_temp_garten",
+              "description": "Ausschließlich den Dummy-Wert für die Gartentemperatur verändern (keine echte Haussteuerung).",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "temp_garten": {
+                    "type": "number",
+                    "minimum": -30,
+                    "maximum": 55,
+                    "description": "Simulierte Temperatur in Grad Celsius"
+                  }
+                },
+                "required": [
+                  "temp_garten"
+                ],
+                "additionalProperties": false
+              }
+            }
+          ],
+          "runs": [
+            {
+              "name": "Abend",
+              "description": "Demo-Abendmodus starten (nur eine ungefährliche Echo-Meldung, keine realen Geräte).",
+              "script": "demo_abend"
+            },
+            {
+              "name": "Testmeldung",
+              "description": "Eine ungefährliche Testmeldung mit begrenzter Anzahl ausgeben.",
+              "command": "echo",
+              "args": [
+                "MCP_Testmeldung",
+                {
+                  "param": "nummer"
+                }
+              ],
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "nummer": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "Testnummer 1 bis 5"
+                  }
+                },
+                "required": [
+                  "nummer"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "Temperaturhinweis",
+              "description": "Ein Demo-Skript mit einer begrenzten Temperaturstufe starten.",
+              "script": "demo_hinweis",
+              "variables": {
+                "stufe": {
+                  "param": "stufe"
+                }
+              },
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "stufe": {
+                    "type": "string",
+                    "enum": [
+                      "kalt",
+                      "warm",
+                      "heiss"
+                    ],
+                    "description": "Einer der drei freigegebenen Hinweise"
+                  }
+                },
+                "required": [
+                  "stufe"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "Nachricht",
+              "description": "Gibt einen frei formulierten kurzen Testtext auf dem Server aus (nur Echo; keine echte Socket.IO-Nachricht).",
+              "command": "echo",
+              "args": [
+                "MCP_Nachricht",
+                {
+                  "param": "msg"
+                }
+              ],
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "msg": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "Freier druckbarer Testtext bis 500 Zeichen; keine Zeilenumbrüche oder Steuerzeichen."
+                  }
+                },
+                "required": [
+                  "msg"
+                ],
+                "additionalProperties": false
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "agui",
+      "class": "signaldeck_ai.chat_processor.AGUIChatProcessor",
+      "config": {
+        "endpoint": "http://127.0.0.1:8765/ag-ui",
+        "cmd": {
+          "name": "LLM",
+          "timeout_seconds": 120
+        },
+        "socketio_bridge": {
+          "routes": [
+            {
+              "room": "haus",
+              "source": "socketio.ai",
+              "response_source": "ai.socketio.haus"
+            }
+          ],
+          "max_queue": 5,
+          "timeout_seconds": 120
+        }
+      }
+    },
+    {
+      "name": "script",
+      "class": "signaldeck_plugin_main.processors.script.script_processor.ScriptProcessor",
+      "config": {}
+    },
+    {
+      "name": "socketio",
+      "class": "signaldeck_plugin_socketio.processor.SocketIOProcessor",
+      "config": {
+        "cors_allowed_origins": "*",
+        "ping_interval": 25,
+        "ping_timeout": 20,
+        "max_http_buffer_size": 1000000,
+        "rooms": [
+          {
+            "name": "haus",
+            "display_name": "Haus / KI-Demo",
+            "persist": false
+          }
+        ],
+        "incoming_message_routes": [
+          {
+            "rooms": [
+              "haus"
+            ],
+            "type": "chat",
+            "prefix": "@haus",
+            "source": "socketio.ai"
+          }
+        ],
+        "message_routes": [
+          {
+            "source": "ai.socketio.haus",
+            "rooms": [
+              "haus"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "AI-Demo",
+      "data": "/config/group_ai.json"
+    }
+  ],
+  "cmd": {
+    "alias": [],
+    "script": [
+      {
+        "name": "demo_abend",
+        "commands": [
+          "echo Abendmodus_Demo"
+        ],
+        "variables": []
+      },
+      {
+        "name": "demo_hinweis",
+        "commands": [
+          "echo Temperaturhinweis_$stufe$"
+        ],
+        "variables": [
+          {
+            "name": "stufe",
+            "type": "str",
+            "default": "warm"
+          }
+        ]
+      },
+      {
+        "name": "demo_llm",
+        "commands": [
+          "LLM $prompt$"
+        ],
+        "variables": [
+          {
+            "name": "prompt",
+            "type": "str",
+            "default": "Wie ist die aktuelle Temperatur im Garten?"
+          }
+        ]
+      }
+    ]
+  }
+}

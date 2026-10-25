@@ -1,0 +1,65 @@
+[
+  {
+    "name": "Simulierte Temperaturen",
+    "element": "Dummy Temperaturwerte",
+    "type": "dummy_temperature",
+    "fa": "fas fa-thermometer-half",
+    "value": [
+      "overview"
+    ]
+  },
+  {
+    "name": "MCP-Server",
+    "element": "MCP Climate",
+    "type": "mcp_climate",
+    "fa": "fas fa-server",
+    "value": [
+      "overview"
+    ]
+  },
+  {
+    "name": "Agenten-Chat Energie",
+    "element": "AG-UI Energie",
+    "type": "agui",
+    "fa": "fas fa-comments",
+    "value": [
+      "energie"
+    ]
+  },
+  {
+    "name": "Agenten-Chat Haus",
+    "element": "AG-UI Haussteuerung",
+    "type": "agui",
+    "fa": "fas fa-comments",
+    "value": [
+      "haussteuerung"
+    ]
+  },
+  {
+    "name": "LLM-Skript testen",
+    "element": "Skripte / LLM-Test",
+    "type": "script",
+    "fa": "fas fa-terminal",
+    "value": [
+      "demo_llm"
+    ]
+  },
+  {
+    "name": "Socket.IO – Übersicht",
+    "element": "Socket.IO Demo",
+    "type": "socketio",
+    "fa": "fas fa-network-wired",
+    "value": [
+      "overview"
+    ]
+  },
+  {
+    "name": "Socket.IO – Haus",
+    "element": "Socket.IO Raum haus",
+    "type": "socketio",
+    "fa": "fas fa-comments",
+    "value": [
+      "haus"
+    ]
+  }
+]
