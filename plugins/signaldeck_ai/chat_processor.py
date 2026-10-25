@@ -9,10 +9,11 @@ from .chat_runtime import ChatActionError, ChatRuntime
 
 
 class ChatDisplayData(DisplayData):
-    def __init__(self, ctx, action_hash, processor):
+    def __init__(self, ctx, action_hash, processor, value):
         super().__init__(ctx, action_hash)
         self.name = processor.name
         self.api_base = f"/plugin/ai/api/chat/{processor.name}"
+        self.view_key = processor.runtime.normalize_view(value)
 
 
 class AGUIChatProcessor(DisplayProcessor):
@@ -44,7 +45,7 @@ class AGUIChatProcessor(DisplayProcessor):
         return "ai/chat.html"
 
     def getDisplayData(self, value, actionHash, **kwargs):
-        return ChatDisplayData(self.ctx, actionHash, self)
+        return ChatDisplayData(self.ctx, actionHash, self, value)
 
     def getAdditionalJsFiles(self, value):
         return [("signaldeck_ai", "js/chat.js")]
