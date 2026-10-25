@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator
 from signaldeck_sdk import DisplayProcessor, DisplayData
 
 from .mcp_server import MCPRuntime
+from .run_actions import RunActions
 from .serialization import bounded_sample, json_safe, series_points, summarize_points
 
 
@@ -57,6 +58,7 @@ class MCPServerProcessor(DisplayProcessor):
             "actions", mcp_data.get("actions", []), "func", self._method_bindings
         )
         self._validate_exposures()
+        self.run_actions = RunActions(mcp_data.get("runs", []))
         self.runtime: MCPRuntime | None = None
 
     def _bindings(self, key: str) -> dict[str, dict[str, Any]]:
@@ -130,7 +132,15 @@ class MCPServerProcessor(DisplayProcessor):
             result.append({"name": "get_history", "description": "Read permitted data rows"})
         if self.action_specs:
             result.append({"name": "execute_action", "description": "Run permitted actions"})
+        if self.run_actions.specs:
+            result.append({"name": "run", "description": "Start a permitted named action"})
         return result
+
+    def registerCommands(self, cmd):
+        self.run_actions.bind(cmd)
+
+    def run_named_action(self, name: str, arguments: dict[str, Any] | None = None):
+        return self.run_actions.execute(name, arguments)
 
     def read_values(self, fields: list[str] | None = None) -> dict[str, Any]:
         """Read selected MCP-published values (or all if fields is omitted).
@@ -261,6 +271,9 @@ class MCPServerProcessor(DisplayProcessor):
                     {"name": keys[0], "days": 2, "include_points": True}
                     if keys else {}
                 )
+            elif name == "run":
+                keys = list(self.run_actions.specs)
+                tool["example_args"] = {"name": keys[0], "arguments": {}} if keys else {}
             else:
                 # Never prepopulate write parameters with potentially unsafe
                 # commands or values. Explicit manual entry is required.
