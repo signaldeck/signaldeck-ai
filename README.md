@@ -16,7 +16,7 @@ docker compose up --build
 The Compose service uses `network_mode: host` on Linux. This permits
 SignalDeck to reach `cli-agent-api` at `127.0.0.1:8765` despite that
 API's deliberate loopback-only binding. The SignalDeck website still
-runs on its standard port 5000. The interactive demo uses `signaldeck-plugin-main` DummyData to publish three mocked temperatures (Garten, Wohnzimmer, Keller), daily synthetic temperature history and an opt-in action changing **only** the dummy garden temperature. The MCP example listens at
+runs on its standard port 5000. The interactive demo uses `signaldeck-plugin-main` DummyData to publish three mocked temperatures (Garten, Wohnzimmer, Keller), half-hourly synthetic temperature time series and an opt-in action changing **only** the dummy garden temperature. The MCP example listens at
 `127.0.0.1:8766/mcp`. Host networking does not provide network
 isolation, and MCP must not be exposed to untrusted networks.
 
@@ -24,14 +24,14 @@ isolation, and MCP must not be exposed to untrusted networks.
 
 The repository root `config/ai.json` defines an operational three-sensor DummyData setup and `config/group_ai.json` provides the DummyData controls plus MCP status and AG-UI chat. `docker-compose.yml` mounts `./config` at `/config`. The Dockerfile installs only the packaged AI plugin and its runtime dependencies; the main plugin is already present in the `signaldeck:dev` base image. Neither `config/` nor `tests/` is packaged in `signaldeck-ai` wheels. The CI builds a wheel and inspects its members to enforce this.
 
-- **Garten:** 18.5 °C, synthetically changes by +0.35 °C per day into the past.
-- **Wohnzimmer:** 21.3 °C, synthetically changes by −0.08 °C per day into the past.
-- **Keller:** 17.8 °C, synthetically changes by +0.03 °C per day into the past.
+- **Garten:** 18.5 °C, synthetic trend of +0.35 °C per day, with 2.0 °C daily variation.
+- **Wohnzimmer:** 21.3 °C, synthetic trend of −0.08 °C per day, with 0.5 °C daily variation.
+- **Keller:** 17.8 °C, synthetic trend of +0.03 °C per day, with 0.2 °C daily variation.
 - **Test action:** `set_temp_garten` changes only the simulated garden temperature, through the DummyData processor. No real hardware connection is configured.
 
 Use `get_values({"fields": ["temp_garten"]})`, `get_history({"name": "hist_temp_garten", "days": 7, "include_points": true})` or `execute_action({"name": "set_temp_garten", "arguments": {"temp_garten": 23.5}})` from a connected MCP client. Action calls can also exercise cli-agent approvals without affecting real devices.
 
-The integration tests under `tests/test_demo_config.py` use the **real** DummyData and SDK ValueProvider, rather than a test-only replica. They verify current values, historical reads, the mock write action, and MCP tool discovery. An actual live Docker/cli-agent/AG-UI test still needs to be carried out on the target environment.
+For `get_history({\"name\": \"hist_temp_garten\", \"days\": 7, \"include_points\": true})`, there are 48 actual datetime-indexed samples per completed day and the partial current day, so the MCP results have meaningful ISO-8601 timestamps (without `time_inferred`). The MCP response samples at most 200 points by default while summary statistics cover the complete time series. To retrieve up to 1,000 points use `max_points: 1000`.\n\nWhile `signaldeck-plugin-main` [PR #7](https://github.com/signaldeck/signaldeck-plugin-main/pull/7) is under review, the demo Dockerfile and CI install its `feature/dummy-history-series` branch. **After that PR is merged**, switch the dependency back to the main release branch. These demo dependencies are not bundled in the AI plugin wheel.\n\nThe integration tests under `tests/test_demo_config.py` use the **real** DummyData and SDK ValueProvider, rather than a test-only replica. They verify current values, historical reads, the mock write action, and MCP tool discovery. An actual live Docker/cli-agent/AG-UI test still needs to be carried out on the target environment.
 
 ## Startup
 
@@ -128,11 +128,7 @@ History entries always use ISO 8601 date/time strings (for example,
 `2026-10-23T09:10:00+00:00`) rather than synthetic `day-0` labels.
 Actual timestamps from a Pandas Series or timestamp-indexed mapping are
 preserved, including timezone information. A date-only index becomes a
-midnight datetime with `time_inferred: true`. The DummyData mock returns
-only one calculated scalar per day, so the MCP server assigns an
-**approximate UTC timestamp** at the query time minus that day offset and
-sets `time_inferred: true`. These mock timestamps are not real measurement
-instants. Untimestamped multi-value sequences and scalar results in
+midnight datetime with `time_inferred: true`. DummyData with `interval_minutes` configured now returns a **real Pandas\nDatetimeIndex with multiple synthetic values per day**, so those mock samples\nalso carry proper timestamps and do not need `time_inferred`. Only legacy\nscalar mock histories lacking timestamps receive an approximate UTC timestamp\nand `time_inferred: true`. Those inferred timestamps are not measurement instants. Untimestamped multi-value sequences and scalar results in
 `mode=range` now fail clearly instead of manufacturing index labels.
 
 
