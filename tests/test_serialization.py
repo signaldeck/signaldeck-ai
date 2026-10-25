@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from signaldeck_ai.serialization import (
-    bounded_sample, json_safe, series_points, summarize_points,
+    bounded_sample, json_safe, merge_history_points, series_points, summarize_points,
 )
 
 
@@ -79,3 +79,24 @@ def test_scalar_history_on_explicit_date_uses_inferred_day_not_now():
     assert points == [{
         "time": "2026-02-28T00:00:00", "value": 17.4, "time_inferred": True,
     }]
+
+
+def test_merge_history_prefers_cache_and_normalizes_aware_timestamp_offsets():
+    persisted = [
+        {"time": "2026-10-25T08:00:00+00:00", "value": 10},
+        {"time": "2026-10-25T09:00:00+00:00", "value": 11},
+    ]
+    cached = [
+        {"time": "2026-10-25T10:00:00+01:00", "value": 22},
+        {"time": "2026-10-25T11:00:00+01:00", "value": 23},
+    ]
+    merged = merge_history_points(persisted, cached)
+    assert len(merged) == 3
+    assert [x["value"] for x in merged] == [10, 22, 23]
+
+
+def test_merge_history_does_not_assume_timezone_for_naive_samples():
+    persisted = [{"time": "2026-10-25T09:00:00", "value": 10}]
+    cached = [{"time": "2026-10-25T09:00:00+00:00", "value": 22}]
+    merged = merge_history_points(persisted, cached)
+    assert len(merged) == 2

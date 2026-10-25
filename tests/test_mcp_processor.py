@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -21,6 +22,8 @@ class Provider:
     def getMethodValue(self, name, *args, **kwargs):
         self.calls.append(("getMethodValue", name, kwargs))
         if name == "history_export":
+            if kwargs.get("currentValues") is True:
+                return None
             if "date" not in kwargs:
                 # The same exported method can also be mapped as a read-only
                 # value with unrelated, explicit args/params.
@@ -86,8 +89,8 @@ def test_histories_iterate_days_and_reject_excessive_range():
     assert result["date"] == "2026-10-24"
     assert result["start_date"] == "2026-10-24"
     assert result["end_date"] == "2026-10-25"
-    assert all(item[2].get("days") == 0 and item[2].get("fullDay") is True for item in provider.calls if item[0] == "getMethodValue")
-    assert {item[2]["date"].date().isoformat() for item in provider.calls if item[0] == "getMethodValue"} == {"2026-10-24", "2026-10-25"}
+    assert all(item[2].get("days") == 0 and item[2].get("fullDay") is True for item in provider.calls if item[0] == "getMethodValue" and not item[2].get("currentValues"))
+    assert {item[2]["date"].date().isoformat() for item in provider.calls if item[0] == "getMethodValue" and not item[2].get("currentValues")} == {"2026-10-24", "2026-10-25"}
     with pytest.raises(ValueError):
         processor.read_history("keller_hist", date="2026-10-24", days=3)
     with pytest.raises(ValueError):
@@ -242,3 +245,80 @@ def test_get_history_rejects_future_end_of_window_without_provider_reads():
     with pytest.raises(ValueError, match="Future"):
         processor.read_history("keller_hist", date=today, days=2)
     assert provider.calls == []
+
+
+def test_today_merges_cached_samples_and_prefers_cache_on_exact_timestamp():
+    processor, provider = make_processor()
+    today = datetime.now().date()
+    yesterday = today - timedelta(days=1)
+    persisted_time = today.isoformat() + "T11:00:00"
+    new_time = today.isoformat() + "T11:01:00"
+    old_cache_time = yesterday.isoformat() + "T23:59:00"
+    original = provider.getMethodValue
+
+    def history(name, *args, **kwargs):
+        if kwargs.get("currentValues"):
+            return {
+                persisted_time: 22.0,
+                new_time: 23.0,
+                old_cache_time: 900.0,
+            }
+        if name == "history_export" and kwargs.get("date") is not None:
+            # Keep persisted reading and RAM cache overlapping at 11:00.
+            if kwargs["date"].date() == today:
+                return {
+                    today.isoformat() + "T10:55:00": 19.0,
+                    persisted_time: 20.0,
+                }
+            return {
+                yesterday.isoformat() + "T12:00:00": 18.0,
+            }
+        return original(name, *args, **kwargs)
+
+    provider.getMethodValue = history
+    result = processor.read_history(
+        "keller_hist", date=yesterday.isoformat(),
+        days=2, include_points=True,
+    )
+    assert [p["value"] for p in result["points"]] == [18.0, 19.0, 22.0, 23.0]
+    assert result["statistics"]["count"] == 4
+    assert result["statistics"]["maximum"] == 23.0
+    assert result["total_points"] == 4
+    assert len([p for p in result["points"] if p["time"] == persisted_time]) == 1
+    assert all(p["value"] != 900.0 for p in result["points"])
+
+
+def test_cache_is_not_queried_for_historical_day_or_range_provider():
+    processor, provider = make_processor()
+    yesterday = (datetime.now().date() - timedelta(days=1)).isoformat()
+    processor.read_history("keller_hist", date=yesterday, days=1)
+    assert not any(c[2].get("currentValues") for c in provider.calls)
+
+    processor.history_specs["keller_hist"]["mode"] = "range"
+    provider.calls.clear()
+    # Custom range methods consume date+days directly (not days=0).
+    provider.getMethodValue = lambda name, *args, **kwargs: (
+        provider.calls.append(("getMethodValue", name, kwargs))
+        or {yesterday + "T12:00:00": 20.0}
+    )
+    processor.read_history("keller_hist", date=yesterday, days=1)
+    assert not any(c[2].get("currentValues") for c in provider.calls)
+    assert provider.calls[0][2]["days"] == 1
+
+
+def test_unavailable_or_scalar_cache_does_not_change_persisted_history():
+    processor, provider = make_processor()
+    today = datetime.now().date().isoformat()
+    original = provider.getMethodValue
+
+    def bad_cache(name, *args, **kwargs):
+        if kwargs.get("currentValues"):
+            return 99.0  # DummyData-compatible scalar, not a cache Series.
+        return original(name, *args, **kwargs)
+
+    provider.getMethodValue = bad_cache
+    result = processor.read_history(
+        "keller_hist", date=today, days=1, include_points=True
+    )
+    assert result["statistics"]["count"] == 1
+    assert result["points"][0]["value"] == float(datetime.now().day)
