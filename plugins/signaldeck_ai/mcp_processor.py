@@ -191,7 +191,7 @@ class MCPServerProcessor(DisplayProcessor):
         self, name: str, *, date: str, days: int = 1,
         include_points: bool = False, max_points: int = 200,
     ) -> dict[str, Any]:
-        """Read a date-anchored span, ending on the requested calendar day.
+        """Read a date-anchored span, starting on the requested calendar day.
 
         PersistData.hist subtracts `days` from `date`: consequently each
         individual day must be queried with days=0 and fullDay=True.
@@ -208,16 +208,17 @@ class MCPServerProcessor(DisplayProcessor):
             raise ValueError("date must be a valid calendar date in YYYY-MM-DD format") from exc
         if target_day.isoformat() != date:
             raise ValueError("date must be a calendar date in YYYY-MM-DD format")
-        if target_day > datetime.now().date():
-            raise ValueError("Future history dates are not permitted")
         if type(days) is not int or not 1 <= days <= spec.get("max_days", 30):
             raise ValueError("Requested history range is not permitted")
         if type(max_points) is not int or not 1 <= max_points <= 1000:
             raise ValueError("max_points must be between 1 and 1000")
         try:
-            first_day = target_day - timedelta(days=days - 1)
+            end_day = target_day + timedelta(days=days - 1)
         except OverflowError as exc:
             raise ValueError("Requested history range is outside valid dates") from exc
+        # No day in the requested interval may lie in the future.
+        if end_day > datetime.now().date():
+            raise ValueError("Future history dates are not permitted")
 
         binding = self._method_bindings[name]
         provider_method = binding["from"]
@@ -225,7 +226,7 @@ class MCPServerProcessor(DisplayProcessor):
             points = []
             if spec.get("mode", "per_day") == "range":
                 # Custom range methods (unlike PersistData.hist) must accept
-                # the explicit inclusive end date and window length, and
+                # the explicit inclusive start date and window length, and
                 # return timestamped records. They never receive an offset.
                 result = self.valueProvider.getMethodValue(
                     provider_method,
@@ -234,7 +235,7 @@ class MCPServerProcessor(DisplayProcessor):
                 points.extend(series_points(result, day=0, allow_scalar=False))
             else:
                 for offset in range(days):
-                    requested_day = target_day - timedelta(days=offset)
+                    requested_day = target_day + timedelta(days=offset)
                     result = self.valueProvider.getMethodValue(
                         provider_method,
                         date=datetime.combine(requested_day, time.min),
@@ -251,7 +252,8 @@ class MCPServerProcessor(DisplayProcessor):
             "name": name,
             "description": spec["description"],
             "date": date,
-            "start_date": first_day.isoformat(),
+            "start_date": date,
+            "end_date": end_day.isoformat(),
             "days": days,
             "statistics": summarize_points(points),
         }
@@ -290,7 +292,8 @@ class MCPServerProcessor(DisplayProcessor):
             elif name == "get_history":
                 keys = list(self.history_specs)
                 tool["example_args"] = (
-                    {"name": keys[0], "date": datetime.now().date().isoformat(),
+                    {"name": keys[0],
+                     "date": (datetime.now() - timedelta(days=1)).date().isoformat(),
                      "days": 2, "include_points": True}
                     if keys else {}
                 )
