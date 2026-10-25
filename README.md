@@ -167,6 +167,78 @@ Arguments are validated before calling the underlying ValueProvider
 method. No method is published as an action implicitly. LLM-side user
 approval remains important for real device changes.
 
+### Named Cmd / script runs
+
+`mcp_data.runs` explicitly publishes **named actions**, not arbitrary
+commands, exported functions, or editable script content. Each alias maps
+either to a registered SignalDeck Cmd command or to an existing script.
+The LLM sees a single stable MCP tool `run(name, arguments?)` regardless
+of how many actions are configured.
+
+Example (inside the MCP processor's `config.mcp_data`):
+
+```json
+{
+  "runs": [
+    {
+      "name": "Abend",
+      "description": "Aktiviere den vorbereiteten Abendmodus.",
+      "script": "abendmodus"
+    },
+    {
+      "name": "Licht",
+      "description": "Schalte eine ausdrücklich freigegebene Lichtzone.",
+      "command": "licht",
+      "args": [{"param": "zone"}, {"param": "state"}],
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "zone": {"type": "string", "enum": ["wohnzimmer", "kueche"]},
+          "state": {"type": "string", "enum": ["ein", "aus"]}
+        },
+        "required": ["zone", "state"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
+```
+
+The example `licht` command and `abendmodus` script must be defined in
+SignalDeck separately; neither is installed by this plugin. The actual
+repository demo instead uses harmless built-in `echo` commands and scripts.
+
+`run({"name": "Abend"})` starts the fixed script without any client-visible
+script name. `run({"name":"Licht", "arguments":{"zone":"kueche","state":"aus"}})`
+starts only the fixed command with these validated tokens.
+
+Configuration rules:
+- Public aliases are unique and must have a description.
+- Exactly one of `command` or `script` is required per alias.
+- A command uses a fixed registered Cmd command and positional `args`.
+  Each argument is either a fixed literal or `{"param":"..." }`.
+- A script uses a fixed existing script and optional `variables` mapping.
+  Every passed variable must exist in its ScriptDefinition.
+- Every exposed parameter must be required. String arguments only permit
+  explicitly enumerated **single safe tokens**. Numeric arguments need
+  finite bounds or an enum. Unexpected properties are forbidden. This is
+  deliberately stricter than general-purpose JSON Schema because Cmd
+  interpolates parameters into command text.
+- Cmd/script targets and their source strings never appear in the tool's
+  public descriptions. The LLM cannot upload script text or submit arbitrary
+  command lines.
+- `run` returns `{"name":"Abend","status":"scheduled"}` if the scheduler
+  accepted the start, or an error if validation or scheduling immediately
+  fails. It **does not claim the entire asynchronous action succeeded**.
+  Long-running execution failures require separate status inspection.
+- The diagnostic UI marks `run` as a state-changing operation and requires
+  explicit confirmation. cli-agent permission for the generic `run` tool
+  covers **every** action in the server's configured run allowlist, so
+  only group appropriately trusted actions on a given MCP server.
+
+`execute_action` continues to provide an optional low-level
+ValueProvider-method integration. For house automation, prefer `run`.
+
 ### Multiple MCP servers
 
 Add another `MCPServerProcessor` with a distinct port and its own
