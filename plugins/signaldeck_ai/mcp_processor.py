@@ -130,17 +130,27 @@ class MCPServerProcessor(DisplayProcessor):
 
     def read_values(self) -> dict[str, Any]:
         with self._read_lock:
-            # Standard Processor.refresh() resolves the unmodified config.values
-            # using ValueProvider. Only mcp_data.values are returned to the LLM.
-            self.refresh()
-            return {
-                name: {
+            # Respect native 'field'/'method' bindings, but never call
+            # refresh() here: refresh() also invokes *unlisted* methods in
+            # config.values and binds all config.methods. An MCP request
+            # must evaluate only explicitly allowlisted sources.
+            result = {}
+            for name, spec in self.value_specs.items():
+                binding = self._value_bindings[name]
+                if binding["type"] == "field":
+                    value = self.valueProvider.getValue(binding["from"])
+                else:
+                    value = self.valueProvider.getMethodValue(
+                        binding["from"],
+                        *binding.get("args", []),
+                        **binding.get("params", {}),
+                    )
+                result[name] = {
                     "description": spec["description"],
-                    "value": json_safe(getattr(self, name)),
+                    "value": json_safe(value),
                     **({"unit": spec["unit"]} if "unit" in spec else {}),
                 }
-                for name, spec in self.value_specs.items()
-            }
+            return result
 
     def read_history(
         self, name: str, *, days: int = 1,
