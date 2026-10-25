@@ -36,7 +36,6 @@ def _validate_parameter_schema(schema: Any, location: str) -> set[str]:
         raise ValueError(f"{location}: parameters must be an object schema")
     if schema.get("additionalProperties") is not False:
         raise ValueError(f"{location}: additionalProperties must be false")
-    Draft202012Validator.check_schema(schema)
     properties = schema.get("properties", {})
     required = schema.get("required", [])
     if not isinstance(properties, dict) or not isinstance(required, list):
@@ -106,6 +105,7 @@ def _validate_parameter_schema(schema: Any, location: str) -> set[str]:
         elif "enum" in definition:
             if definition["enum"] not in ([True], [False], [True, False], [False, True]):
                 raise ValueError(f"{location}.{key}: invalid boolean enum")
+    Draft202012Validator.check_schema(schema)
     return set(properties)
 
 
