@@ -128,14 +128,35 @@ class MCPServerProcessor(DisplayProcessor):
             result.append({"name": "execute_action", "description": "Run permitted actions"})
         return result
 
-    def read_values(self) -> dict[str, Any]:
+    def read_values(self, fields: list[str] | None = None) -> dict[str, Any]:
+        """Read selected MCP-published values (or all if fields is omitted).
+
+        Validate all requested local MCP names before accessing ValueProvider.
+        """
+        if fields is None:
+            selected = list(self.value_specs)
+        else:
+            if not isinstance(fields, list):
+                raise ValueError("fields must be an array of published MCP field names")
+            if len(fields) > 256:
+                raise ValueError("fields must contain at most 256 names")
+            selected = []
+            seen = set()
+            for name in fields:
+                if not isinstance(name, str) or name not in self.value_specs:
+                    raise ValueError("Unknown or unauthorized MCP field")
+                if name not in seen:
+                    selected.append(name)
+                    seen.add(name)
+
         with self._read_lock:
             # Respect native 'field'/'method' bindings, but never call
             # refresh() here: refresh() also invokes *unlisted* methods in
             # config.values and binds all config.methods. An MCP request
             # must evaluate only explicitly allowlisted sources.
             result = {}
-            for name, spec in self.value_specs.items():
+            for name in selected:
+                spec = self.value_specs[name]
                 binding = self._value_bindings[name]
                 if binding["type"] == "field":
                     value = self.valueProvider.getValue(binding["from"])
