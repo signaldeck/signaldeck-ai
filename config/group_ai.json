@@ -43,5 +43,23 @@
     "value": [
       "demo_llm"
     ]
+  },
+  {
+    "name": "Socket.IO – Übersicht",
+    "element": "Socket.IO Demo",
+    "type": "socketio",
+    "fa": "fas fa-network-wired",
+    "value": [
+      "overview"
+    ]
+  },
+  {
+    "name": "Socket.IO – Haus",
+    "element": "Socket.IO Raum haus",
+    "type": "socketio",
+    "fa": "fas fa-comments",
+    "value": [
+      "haus"
+    ]
   }
 ]
