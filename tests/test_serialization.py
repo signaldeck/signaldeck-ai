@@ -72,3 +72,10 @@ def test_unstamped_series_and_range_scalars_are_rejected():
         series_points(18.0, day=7, allow_scalar=False)
     with pytest.raises(ValueError, match="timestamp"):
         series_points({"day-0": 18.0}, day=0)
+
+
+def test_scalar_history_on_explicit_date_uses_inferred_day_not_now():
+    points = series_points(17.4, day=0, sample_date=date(2026, 2, 28))
+    assert points == [{
+        "time": "2026-02-28T00:00:00", "value": 17.4, "time_inferred": True,
+    }]
