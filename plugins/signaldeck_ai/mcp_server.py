@@ -157,6 +157,40 @@ class MCPRuntime:
                     include_points=include_points, max_points=max_points,
                 )
 
+
+            @mcp.tool(
+                name="get_historical_value",
+                description=(
+                    "Retrieve ONE historical value for a precise, REQUIRED local "
+                    "date and time (YYYY-MM-DDTHH:MM:SS). An ISO date without "
+                    "a time is invalid. Calls SignalDeck hist(date=..., "
+                    "days=0, fullDay=False), selecting the datastore's best "
+                    "matching value; this is not necessarily a measurement "
+                    "recorded at exactly the requested second. For whole-day "
+                    "measurements and statistics, use get_history instead. "
+                    "Only explicitly configured per-day history names are "
+                    "permitted. Available history names:\n"
+                ) + "\n".join(
+                    f"- {item['name']}: {item['description']}"
+                    for item in history.values()
+                    if item.get("mode", "per_day") == "per_day"
+                ),
+            )
+            def get_historical_value(
+                name: Annotated[str, Field(
+                    description="Local name of an explicitly allowed per-day history method."
+                )],
+                date: Annotated[str, Field(
+                    description=(
+                        "REQUIRED exact local date AND time formatted "
+                        "YYYY-MM-DDTHH:MM:SS; date-only values are rejected. "
+                        "Example: 2026-10-20T14:30:00."
+                    ),
+                    pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$",
+                )],
+            ) -> dict[str, Any]:
+                return processor.read_historical_value(name, date=date)
+
         if actions:
             description = "Execute an explicitly configured SignalDeck action.\n"
             description += "\n".join(
@@ -232,7 +266,15 @@ class MCPRuntime:
                 return {key: convert(item) for key, item in value.items()}
             return value
 
-        return convert(result)
+        converted = convert(result)
+        # FastMCP's in-process call returns (text content blocks, structured
+        # output). The diagnostic UI should show the structured output once,
+        # not both serialized and structured copies of the same measurements.
+        if (isinstance(converted, list) and len(converted) == 2
+                and isinstance(converted[0], list)
+                and isinstance(converted[1], dict)):
+            return converted[1]
+        return converted
 
     def start(self) -> None:
         if self.thread is not None:
