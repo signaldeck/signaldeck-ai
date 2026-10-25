@@ -17,6 +17,10 @@ from jsonschema import Draft202012Validator
 # Cmd splits its command line on spaces and the script interpreter interpolates
 # variables into text. Restrict dynamic string inputs to literal safe tokens.
 _SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_./:@+-]{1,128}$")
+# Free text is opt-in, only for the final command argument. Cmd splits the
+# command line at spaces, so the recipient command must be designed to gather
+# the trailing words (e.g. socketio_send <room> <message...>).
+MAX_FREE_TEXT_LENGTH = 500
 _EMPTY_SCHEMA = {
     "type": "object", "properties": {},
     "required": [], "additionalProperties": False,
@@ -47,18 +51,39 @@ def _validate_parameter_schema(schema: Any, location: str) -> set[str]:
         if kind not in {"string", "number", "integer", "boolean"}:
             raise ValueError(f"{location}.{key}: primitive parameter type required")
         # Refuse complex schemas: keep the exposed surface easy to audit.
-        permitted = {
-            "type", "description", "enum", "minimum", "maximum",
-        }
+        permitted = {"type", "description", "enum"}
+        if kind == "string":
+            permitted |= {"minLength", "maxLength"}
+        elif kind in {"number", "integer"}:
+            permitted |= {"minimum", "maximum"}
         if set(definition) - permitted:
             raise ValueError(f"{location}.{key}: unsupported schema constraints")
         if kind == "string":
             choices = definition.get("enum")
-            if not isinstance(choices, list) or not 1 <= len(choices) <= 64:
-                raise ValueError(f"{location}.{key}: string must have a bounded enum")
-            if any(type(choice) is not str or not _SAFE_TOKEN.fullmatch(choice)
-                   for choice in choices):
-                raise ValueError(f"{location}.{key}: string enum must use safe tokens")
+            if choices is None:
+                limit = definition.get("maxLength")
+                minimum = definition.get("minLength", 1)
+                if (type(limit) is not int or not 1 <= limit <= MAX_FREE_TEXT_LENGTH
+                        or type(minimum) is not int or not 1 <= minimum <= limit):
+                    raise ValueError(
+                        f"{location}.{key}: free text needs maxLength "
+                        f"1..{MAX_FREE_TEXT_LENGTH} and optional minLength >= 1"
+                    )
+            else:
+                if not isinstance(choices, list) or not 1 <= len(choices) <= 64:
+                    raise ValueError(f"{location}.{key}: string must have a bounded enum")
+                if any(type(choice) is not str or not _SAFE_TOKEN.fullmatch(choice)
+                       for choice in choices):
+                    raise ValueError(f"{location}.{key}: string enum must use safe tokens")
+                for bound in ("minLength", "maxLength"):
+                    if bound in definition and (
+                        type(definition[bound]) is not int
+                        or definition[bound] < 0
+                    ):
+                        raise ValueError(f"{location}.{key}: invalid {bound}")
+                if ("minLength" in definition and "maxLength" in definition
+                        and definition["minLength"] > definition["maxLength"]):
+                    raise ValueError(f"{location}.{key}: minLength exceeds maxLength")
         elif kind in {"number", "integer"}:
             choices = definition.get("enum")
             if choices is None:
@@ -96,6 +121,20 @@ def _validate_token_spec(token: Any, params: set[str], location: str) -> set[str
     if type(token) is float and not math.isfinite(token):
         raise ValueError(f"{location}: non-finite literal")
     return set()
+
+
+def _validate_free_text(value: str) -> None:
+    """Reject controls, Unicode format marks and ambiguous surrounding space.
+
+    Free text can contain spaces, punctuation and normal Unicode. It cannot
+    add new ScriptParser statements, control chars or terminal escapes.
+    """
+    if (type(value) is not str or not value
+            or value != value.strip() or not value.isprintable()):
+        raise ValueError(
+            "Free text must be nonempty printable text without leading/trailing "
+            "whitespace, line breaks, control or format characters"
+        )
 
 
 def _token_to_string(value: Any) -> str:
@@ -148,6 +187,24 @@ class RunActions:
                     if not isinstance(key, str) or not key:
                         raise ValueError(f"{location}: invalid variable")
                     used |= _validate_token_spec(token, param_names, f"{location}.variables.{key}")
+            free_text_params = {
+                key for key, definition in schema.get("properties", {}).items()
+                if definition.get("type") == "string" and "enum" not in definition
+            }
+            if free_text_params:
+                if "script" in item:
+                    # Script variables are interpolated into arbitrary command
+                    # positions. Do not allow free text in this path.
+                    raise ValueError(
+                        f"{location}: free text is supported only for Cmd commands"
+                    )
+                for index, token in enumerate(args):
+                    if (isinstance(token, dict)
+                            and token.get("param") in free_text_params
+                            and index != len(args) - 1):
+                        raise ValueError(
+                            f"{location}: free text must be the final Cmd argument"
+                        )
             if used != param_names:
                 raise ValueError(f"{location}: parameters must map to all declared arguments")
             self.specs[name] = {**item, "parameters": schema}
@@ -200,6 +257,9 @@ class RunActions:
         if any(type(value) is float and not math.isfinite(value)
                for value in arguments.values()):
             raise ValueError("Non-finite run arguments are not allowed")
+        for key, definition in spec["parameters"].get("properties", {}).items():
+            if definition.get("type") == "string" and "enum" not in definition:
+                _validate_free_text(arguments[key])
 
         def resolve(value):
             return arguments[value["param"]] if isinstance(value, dict) else value
