@@ -88,15 +88,20 @@
 
     fresh.addEventListener("click", async () => {
       if (!connectionId || busy) return;
+      if (!window.confirm(
+        "Chat-Verlauf zurücksetzen? Die bisherige Konversation und offene " +
+        "Freigaben werden verworfen. Die Verbindung zum Agenten bleibt bestehen."
+      )) return;
       busy = true;
       updateUI();
       try {
-        await action("new_chat");
+        const result = await action("reset_history");
+        if (!result.history_reset) throw new Error("Zurücksetzen nicht bestätigt.");
         interrupt = null;
         approvals.hidden = true;
         transcript.replaceChildren();
       } catch (err) {
-        render("info", "Neuer Chat: " + String(err.message || err));
+        render("info", "Verlauf zurücksetzen: " + String(err.message || err));
       } finally {
         busy = false;
         updateUI();
