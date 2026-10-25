@@ -40,7 +40,7 @@ def test_chat_config_rejects_untrusted_endpoints(url):
 def test_native_action_processor_returns_ack_without_rerender(monkeypatch):
     processor = make_processor()
     app = Flask(__name__)
-    monkeypatch.setattr(processor.runtime, "verify_and_connect", lambda token: "opaque-connection")
+    monkeypatch.setattr(processor.runtime, "verify_and_connect", lambda token, view_key=None: "opaque-connection")
     with app.test_request_context(
         "/run", method="POST",
         headers={"Origin": "http://localhost"},
@@ -215,6 +215,7 @@ def test_native_reset_history_action_returns_ack_without_rerender(monkeypatch):
     processor = make_processor()
     calls = []
     monkeypatch.setattr(processor.runtime, "new_chat", lambda identifier: calls.append(identifier))
+    monkeypatch.setattr(processor.runtime, "assert_view", lambda value, identifier: None)
     app = Flask(__name__)
     with app.test_request_context(
         "/run", method="POST", headers={"Origin": "http://localhost"},
