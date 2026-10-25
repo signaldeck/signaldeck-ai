@@ -342,6 +342,7 @@ class ChatRuntime:
                         # action whose previous execution status is unknown.
                         connection.pending_interrupt = None
                 run.finish()
+                run.finalized = True
 
     def _receive_frame(self, connection: AgentConnection, run: AgentRun, lines: list[str]):
         try:
@@ -385,6 +386,9 @@ class ChatRuntime:
             if connection is None:
                 raise ChatActionError("Chat-Verbindung nicht gefunden.")
             connection.revoked = True
+            if (connection.view_key is not None
+                    and self._views.get(connection.view_key) == identifier):
+                self._views.pop(connection.view_key, None)
             self._spawn_cleanup(connection)
 
     def _spawn_cleanup(self, connection: AgentConnection, thread_id: str | None = None):
@@ -407,6 +411,7 @@ class ChatRuntime:
         with self._lock:
             connections = tuple(self._connections.values())
             self._connections.clear()
+            self._views.clear()
             for connection in connections:
                 connection.revoked = True
                 self._spawn_cleanup(connection)
