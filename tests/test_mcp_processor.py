@@ -32,27 +32,30 @@ def make_processor():
     p = Provider()
     config = {
         "values": [
-            {
-                "type": "field", "name": "keller", "from": "temp_export",
-                "description": "Temperature in basement", "unit": "°C"
-            }
+            {"type": "field", "name": "keller", "from": "temp_export"},
+            {"type": "field", "name": "hidden", "from": "hidden_export"}
         ],
         "methods": [
-            {
-                "name": "keller_hist", "from": "history_export", "kind": "history",
-                "description": "Basement time series", "max_days": 2
-            },
-            {
-                "name": "setpoint", "from": "action_export", "kind": "action",
-                "description": "Set a controlled test value",
-                "parameters": {
-                    "type": "object", "properties": {
-                        "setpoint": {"type": "number", "minimum": 0, "maximum": 30}
-                    },
-                    "required": ["setpoint"], "additionalProperties": False
-                }
-            }
+            {"name": "keller_hist", "from": "history_export"},
+            {"name": "setpoint", "from": "action_export"}
         ],
+        "mcp_data": {
+            "values": [
+                {"field": "keller", "description": "Temperature in basement", "unit": "°C"}
+            ],
+            "data_rows": [
+                {"func": "keller_hist", "description": "Basement time series", "max_days": 2}
+            ],
+            "actions": [
+                {"func": "setpoint", "description": "Set a controlled test value",
+                 "parameters": {
+                     "type": "object", "properties": {
+                         "setpoint": {"type": "number", "minimum": 0, "maximum": 30}
+                     },
+                     "required": ["setpoint"], "additionalProperties": False
+                 }}
+            ]
+        },
     }
     import logging
     ctx = SimpleNamespace(logger=logging.getLogger("tests"))
@@ -65,6 +68,8 @@ def test_mcp_reuses_value_provider_and_descriptions():
     assert response["keller"]["value"] == 23.5
     assert response["keller"]["description"] == "Temperature in basement"
     assert ("getValue", "temp_export") in provider.calls
+    assert "hidden" not in response
+    assert ("getValue", "hidden_export") not in provider.calls
 
 
 def test_histories_iterate_days_and_reject_excessive_range():
@@ -98,3 +103,41 @@ def test_mcp_runtime_builds_streamable_http_asgi_app():
     assert runtime.url == "http://127.0.0.1:8766/mcp"
     assert runtime.mcp.streamable_http_app() is not None
     assert runtime.status == "pending"
+
+
+def test_mcp_data_rejects_names_not_bound_by_native_processor_config():
+    processor, provider = make_processor()
+    config = dict(processor.config)
+    config["mcp_data"] = {
+        "values": [{"field": "raw_source_name", "description": "Not a local alias"}]
+    }
+    import logging
+    with pytest.raises(ValueError, match="unknown"):
+        MCPServerProcessor(
+            "mcp_climate", config, SimpleNamespace(logger=logging.getLogger("tests")),
+            provider, False,
+        )
+
+
+def test_mcp_value_method_binding_preserves_config_args_and_params():
+    processor, provider = make_processor()
+    processor.config["values"].append({
+        "type": "method", "name": "derived_value", "from": "history_export",
+        "args": [1], "params": {"mode": "summary"},
+    })
+    processor.config["mcp_data"]["values"].append({
+        "field": "derived_value", "description": "Derived history value",
+    })
+    # Construct the processor from the final configuration.
+    import logging
+    processor = MCPServerProcessor(
+        "mcp_climate", processor.config,
+        SimpleNamespace(logger=logging.getLogger("tests")), provider, False,
+    )
+    results = processor.read_values()
+    assert "derived_value" in results
+    assert any(
+        call[0] == "getMethodValue" and call[1] == "history_export"
+        and call[2].get("mode") == "summary"
+        for call in provider.calls
+    )
