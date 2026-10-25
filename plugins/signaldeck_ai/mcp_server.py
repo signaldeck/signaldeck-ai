@@ -86,21 +86,22 @@ class MCPRuntime:
 
         if history:
             description = (
-                "Read historical measurements from the last N calendar days "
-                "(including today), using the configured per-day history "
-                "method or range method. By DEFAULT (include_points=false), "
-                "the tool returns AGGREGATE STATISTICS over ALL measurements "
-                "in the requested period: count, numeric_count, minimum, "
-                "maximum, mean, first_time and last_time. It does NOT return "
-                "the measurement nearest to 'now minus N days', nor a "
-                "single historical value. With include_points=true it "
-                "ADDITIONALLY returns timestamp/value samples (up to max_points); "
-                "if there are more samples than max_points, these are evenly "
-                "sampled, but statistics still use ALL measurements. "
-                "Set include_points=true for time-series/trend questions "
-                "that need actual individual measurements.\n"
+                "Read historical measurements for an explicit calendar date "
+                "(YYYY-MM-DD). date is REQUIRED and is the inclusive END date. "
+                "days=1 reads that calendar day; days=N reads that day and the "
+                "preceding N-1 days, subject to the configured max_days. "
+                "This is NOT the offset argument of SignalDeck PersistData.hist: "
+                "the adapter selects each day with hist(date=..., days=0, "
+                "fullDay=True). By DEFAULT (include_points=false), the tool "
+                "returns AGGREGATE STATISTICS over ALL measurements in the "
+                "selected period: count, numeric_count, minimum, maximum, "
+                "mean, first_time and last_time. With include_points=true "
+                "it ADDITIONALLY returns timestamp/value samples (up to "
+                "max_points); if there are more samples than max_points, "
+                "they are evenly sampled, while statistics still use ALL "
+                "measurements. Set include_points=true for trend questions.\\n"
             )
-            description += "\n".join(
+            description += "\\n".join(
                 f"- {item['name']}: {item['description']} (up to {item.get('max_days', 30)} days)"
                 for item in history.values()
             )
@@ -110,12 +111,19 @@ class MCPRuntime:
                 name: Annotated[str, Field(
                     description="Local name of an allowed data_rows history method."
                 )],
+                date: Annotated[str, Field(
+                    description=(
+                        "Required calendar date YYYY-MM-DD, inclusive END "
+                        "date of the selected history window. For example "
+                        "2026-10-20 with days=2 selects October 19 and 20."
+                    ),
+                    pattern=r"^\\d{4}-\\d{2}-\\d{2}$",
+                )],
                 days: Annotated[int, Field(
                     description=(
-                        "Number of calendar days to query, including today. "
-                        "For example, days=7 aggregates measurements from "
-                        "today and the preceding six calendar days; this is "
-                        "NOT a point-in-time lookup at now minus seven days."
+                        "Number of calendar days ending on the selected "
+                        "date, including the date itself (default 1). "
+                        "NOT a relative offset from today."
                     ),
                     ge=1,
                 )] = 1,
@@ -141,7 +149,8 @@ class MCPRuntime:
                 )] = 200,
             ) -> dict[str, Any]:
                 return processor.read_history(
-                    name, days=days, include_points=include_points, max_points=max_points
+                    name, date=date, days=days,
+                    include_points=include_points, max_points=max_points,
                 )
 
         if actions:
