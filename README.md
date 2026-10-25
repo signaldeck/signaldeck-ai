@@ -31,7 +31,11 @@ The repository root `config/ai.json` defines an operational three-sensor DummyDa
 
 Use `get_values({"fields": ["temp_garten"]})`, `get_history({"name": "hist_temp_garten", "days": 7, "include_points": true})` or `execute_action({"name": "set_temp_garten", "arguments": {"temp_garten": 23.5}})` from a connected MCP client. Action calls can also exercise cli-agent approvals without affecting real devices.
 
-For `get_history({\"name\": \"hist_temp_garten\", \"days\": 7, \"include_points\": true})`, there are 48 actual datetime-indexed samples per completed day and the partial current day, so the MCP results have meaningful ISO-8601 timestamps (without `time_inferred`). The MCP response samples at most 200 points by default while summary statistics cover the complete time series. To retrieve up to 1,000 points use `max_points: 1000`.\n\nWhile `signaldeck-plugin-main` [PR #7](https://github.com/signaldeck/signaldeck-plugin-main/pull/7) is under review, the demo Dockerfile and CI install its `feature/dummy-history-series` branch. **After that PR is merged**, switch the dependency back to the main release branch. These demo dependencies are not bundled in the AI plugin wheel.\n\nThe integration tests under `tests/test_demo_config.py` use the **real** DummyData and SDK ValueProvider, rather than a test-only replica. They verify current values, historical reads, the mock write action, and MCP tool discovery. An actual live Docker/cli-agent/AG-UI test still needs to be carried out on the target environment.
+For `get_history({\"name\": \"hist_temp_garten\", \"days\": 7, \"include_points\": true})`, there are 48 actual datetime-indexed samples per completed day and the partial current day, so the MCP results have meaningful ISO-8601 timestamps (without `time_inferred`). The MCP response samples at most 200 points by default while summary statistics cover the complete time series. To retrieve up to 1,000 points use `max_points: 1000`.
+
+While `signaldeck-plugin-main` [PR #7](https://github.com/signaldeck/signaldeck-plugin-main/pull/7) is under review, the demo Dockerfile and CI install its `feature/dummy-history-series` branch. **After that PR is merged**, switch the dependency back to the main release branch. These demo dependencies are not bundled in the AI plugin wheel.
+
+The integration tests under `tests/test_demo_config.py` use the **real** DummyData and SDK ValueProvider, rather than a test-only replica. They verify current values, historical reads, the mock write action, and MCP tool discovery. An actual live Docker/cli-agent/AG-UI test still needs to be carried out on the target environment.
 
 ## Startup
 
@@ -71,7 +75,12 @@ Example of an MCP processor's `config`:
 
 ```json
 {
-  "mcp": {\n    "name": "house-climate",\n    "host": "127.0.0.1",\n    "port": 8766,\n    "instructions": "Dieser MCP-Server stellt aktuelle und historische Klimadaten bereit."\n  },
+  "mcp": {
+    "name": "house-climate",
+    "host": "127.0.0.1",
+    "port": 8766,
+    "instructions": "Dieser MCP-Server stellt aktuelle und historische Klimadaten bereit."
+  },
   "values": [
     {"name": "temp_garten", "type": "field", "from": "temperature_garten"},
     {"name": "temp_intern", "type": "field", "from": "another_export"}
@@ -111,7 +120,20 @@ validation rather than exposing other fields by accident.
 Read calls resolve **only** allowlisted ValueProvider references and never
 invoke unrelated entries while refreshing a processor.
 
-### MCP instructions and selective current values\n\nSet `config.mcp.instructions` to a string to supply MCP server-level\ninstructions. These are provided through the standard MCP initialization\nmetadata (not embedded in individual tool descriptions).\n\n`get_values(fields)` accepts an optional list of **local MCP-published names**.\nFor example, `{"fields": ["temp_garten"]}` reads only the garden temperature.\nOmitting `fields` reads all published values; `[]` reads none. Unknown\nor unpublished names are rejected before reading any values. The tool\ndescription enumerates the permitted fields and their descriptions. Tool\nnames remain stable, which preserves cli-agent approval matching.\n\n### Historical data
+### MCP instructions and selective current values
+
+Set `config.mcp.instructions` to a string to supply MCP server-level
+instructions. These are provided through the standard MCP initialization
+metadata (not embedded in individual tool descriptions).
+
+`get_values(fields)` accepts an optional list of **local MCP-published names**.
+For example, `{"fields": ["temp_garten"]}` reads only the garden temperature.
+Omitting `fields` reads all published values; `[]` reads none. Unknown
+or unpublished names are rejected before reading any values. The tool
+description enumerates the permitted fields and their descriptions. Tool
+names remain stable, which preserves cli-agent approval matching.
+
+### Historical data
 
 The shared `PersistData.hist(days=N, fullDay=True)` fetches one
 individual day offset N, **not** an N-day window. For `mode=per_day`
@@ -128,7 +150,11 @@ History entries always use ISO 8601 date/time strings (for example,
 `2026-10-23T09:10:00+00:00`) rather than synthetic `day-0` labels.
 Actual timestamps from a Pandas Series or timestamp-indexed mapping are
 preserved, including timezone information. A date-only index becomes a
-midnight datetime with `time_inferred: true`. DummyData with `interval_minutes` configured now returns a **real Pandas\nDatetimeIndex with multiple synthetic values per day**, so those mock samples\nalso carry proper timestamps and do not need `time_inferred`. Only legacy\nscalar mock histories lacking timestamps receive an approximate UTC timestamp\nand `time_inferred: true`. Those inferred timestamps are not measurement instants. Untimestamped multi-value sequences and scalar results in
+midnight datetime with `time_inferred: true`. DummyData with `interval_minutes` configured now returns a **real Pandas
+DatetimeIndex with multiple synthetic values per day**, so those mock samples
+also carry proper timestamps and do not need `time_inferred`. Only legacy
+scalar mock histories lacking timestamps receive an approximate UTC timestamp
+and `time_inferred: true`. Those inferred timestamps are not measurement instants. Untimestamped multi-value sequences and scalar results in
 `mode=range` now fail clearly instead of manufacturing index labels.
 
 
