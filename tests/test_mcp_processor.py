@@ -322,3 +322,52 @@ def test_unavailable_or_scalar_cache_does_not_change_persisted_history():
     )
     assert result["statistics"]["count"] == 1
     assert result["points"][0]["value"] == float(datetime.now().day)
+
+
+def test_point_lookup_passes_exact_datetime_and_full_day_false():
+    processor, provider = make_processor()
+    original = provider.getMethodValue
+
+    def get_method(name, *args, **kwargs):
+        if kwargs.get("fullDay") is False:
+            provider.calls.append(("getMethodValue", name, kwargs))
+            return 321.5
+        return original(name, *args, **kwargs)
+
+    provider.getMethodValue = get_method
+    result = processor.read_historical_value(
+        "keller_hist", date="2026-10-20T14:30:00",
+    )
+    assert result["value"] == 321.5
+    assert result["requested_time"] == "2026-10-20T14:30:00"
+    assert provider.calls[-1][2] == {
+        "date": datetime(2026, 10, 20, 14, 30, 0),
+        "days": 0, "fullDay": False,
+    }
+
+
+@pytest.mark.parametrize("invalid", [
+    "2026-10-20", "2026-10-20T14:30", "2026-10-20T24:30:00",
+    "2026-02-30T12:30:00", "2026-10-20T14:30:00Z",
+    "2026-10-20T14:30:00+02:00", "2026-10-20 14:30:00",
+    "2999-01-01T10:00:00", "", None,
+])
+def test_point_lookup_requires_valid_nonfuture_full_local_timestamp(invalid):
+    processor, provider = make_processor()
+    with pytest.raises(ValueError):
+        processor.read_historical_value("keller_hist", date=invalid)
+    assert not provider.calls
+
+
+def test_point_lookup_respects_allowlist_and_rejects_non_per_day_method():
+    processor, provider = make_processor()
+    with pytest.raises(ValueError):
+        processor.read_historical_value(
+            "not_allowed", date="2026-10-20T14:30:00",
+        )
+    processor.history_specs["keller_hist"]["mode"] = "range"
+    with pytest.raises(ValueError, match="per-day"):
+        processor.read_historical_value(
+            "keller_hist", date="2026-10-20T14:30:00",
+        )
+    assert not provider.calls
