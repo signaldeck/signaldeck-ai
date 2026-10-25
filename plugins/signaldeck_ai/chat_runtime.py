@@ -19,6 +19,7 @@ import httpx
 
 MAX_MESSAGE_CHARS = 12_000
 MAX_HISTORY_MESSAGES = 160
+MAX_VISIBLE_TOOL_CALLS = 1024  # Bounded UI-only history, never sent to cli-agent.
 MAX_RUN_EVENTS = 4096
 MAX_EVENT_BYTES = 256 * 1024
 CONNECTION_IDLE_SECONDS = 30 * 60
@@ -84,6 +85,9 @@ class AgentConnection:
     view_key: str | None = None
     thread_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    # Keep display-only events separate from the agent's conversation context.
+    display_messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
+    tool_calls: dict[str, dict[str, str]] = field(default_factory=dict, repr=False)
     runs: dict[str, AgentRun] = field(default_factory=dict, repr=False)
     current_run: str | None = None
     pending_interrupt: dict[str, Any] | None = field(default=None, repr=False)
@@ -130,11 +134,15 @@ class ChatRuntime:
                 return {"connected": False, "messages": [], "busy": False}
 
             connection.last_used = time.monotonic()
-            messages = [
-                {"role": msg["role"], "content": msg["content"]}
-                for msg in connection.messages
-                if msg["role"] in {"user", "assistant"}
-            ]
+            messages = []
+            for msg in connection.display_messages:
+                if msg["role"] == "tools":
+                    messages.append({
+                        "role": "tools", "id": msg["id"],
+                        "tools": [dict(tool) for tool in msg["tools"]],
+                    })
+                else:
+                    messages.append({"role": msg["role"], "content": msg["content"]})
             current = connection.runs.get(connection.current_run)
             busy = bool(current and not current.finalized)
             if busy:
@@ -272,6 +280,9 @@ class ChatRuntime:
                 "role": "user",
                 "content": message.strip(),
             })
+            connection.display_messages.append({
+                "role": "user", "content": message.strip(),
+            })
             return self._submit_locked(connection)
 
     def approve(self, identifier: str, interrupt_id: str, decision: str) -> str:
@@ -362,6 +373,10 @@ class ChatRuntime:
                                 "role": "assistant",
                                 "content": run.answer[:100_000],
                             })
+                            connection.display_messages.append({
+                                "role": "assistant",
+                                "content": run.answer[:100_000],
+                            })
                     else:
                         # Reset ambiguous history rather than retrying an
                         # action whose previous execution status is unknown.
@@ -381,9 +396,80 @@ class ChatRuntime:
                     with self._lock:
                         if not connection.revoked and connection.current_run == run.run_id:
                             connection.pending_interrupt = interrupts[0] if interrupts else None
+            with self._lock:
+                if not connection.revoked and connection.current_run == run.run_id:
+                    self._record_tool_activity(connection, run, event)
             run.emit(event)
         except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
             raise ChatActionError("Ungültiges AG-UI-Event.") from exc
+
+    @staticmethod
+    def _record_tool_activity(
+        connection: AgentConnection, run: AgentRun, event: dict[str, Any],
+    ) -> None:
+        """Keep a bounded, display-only tool timeline from existing AG-UI events.
+
+        Store ONLY the MCP tool name and its lifecycle status. Never persist
+        arguments, responses, or approval metadata in the chat transcript.
+        The agent's own conversation payload remains completely unchanged.
+        """
+        kind = event.get("type")
+        call_id = event.get("toolCallId")
+        valid_id = isinstance(call_id, str) and 0 < len(call_id) <= 256
+        if kind == "TOOL_CALL_START" and valid_id:
+            existing = connection.tool_calls.get(call_id)
+            if existing is not None:
+                existing["status"] = "running"
+                return
+            if len(connection.tool_calls) >= MAX_VISIBLE_TOOL_CALLS:
+                return
+            name = event.get("toolCallName")
+            if not isinstance(name, str) or not name.strip():
+                name = "Unbekanntes Tool"
+            # The tool name comes from the agent; avoid unbounded UI strings.
+            tool = {"id": call_id, "name": name[:256], "status": "running"}
+            group = next((
+                item for item in reversed(connection.display_messages)
+                if item["role"] == "tools" and item["id"] == run.run_id
+            ), None)
+            if group is None:
+                group = {"role": "tools", "id": run.run_id, "tools": []}
+                connection.display_messages.append(group)
+            group["tools"].append(tool)
+            connection.tool_calls[call_id] = tool
+        elif kind == "TOOL_CALL_RESULT" and valid_id:
+            tool = connection.tool_calls.get(call_id)
+            if tool is not None:
+                status = event.get("content")
+                tool["status"] = (
+                    status if status in {"success", "error", "denied", "finished"}
+                    else "finished"
+                )
+        elif kind == "RUN_FINISHED":
+            outcome = event.get("outcome") or {}
+            if isinstance(outcome, dict) and outcome.get("type") == "interrupt":
+                for interrupt in outcome.get("interrupts") or []:
+                    if not isinstance(interrupt, dict):
+                        continue
+                    requested = interrupt.get("toolCallId")
+                    tool = (
+                        connection.tool_calls.get(requested)
+                        if isinstance(requested, str) else None
+                    )
+                    if tool is not None:
+                        tool["status"] = "approval"
+            else:
+                for group in connection.display_messages:
+                    if group["role"] == "tools" and group["id"] == run.run_id:
+                        for tool in group["tools"]:
+                            if tool["status"] == "running":
+                                tool["status"] = "finished"
+        elif kind == "RUN_ERROR":
+            for group in connection.display_messages:
+                if group["role"] == "tools" and group["id"] == run.run_id:
+                    for tool in group["tools"]:
+                        if tool["status"] == "running":
+                            tool["status"] = "error"
 
     def get_run(self, identifier: str, run_id: str) -> AgentRun:
         with self._lock:
@@ -400,6 +486,8 @@ class ChatRuntime:
             previous_thread = connection.thread_id
             connection.thread_id = uuid.uuid4().hex
             connection.messages = []
+            connection.display_messages.clear()
+            connection.tool_calls.clear()
             connection.pending_interrupt = None
             connection.current_run = None
             connection.runs.clear()
