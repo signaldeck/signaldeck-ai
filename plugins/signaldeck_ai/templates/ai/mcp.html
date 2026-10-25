@@ -1,9 +1,24 @@
-<div class="state-container">
-  <div class="state-row"><div class="state-label">MCP-Server</div><div class="state-value">{{ displayData.name }}</div></div>
-  <div class="state-row"><div class="state-label">Status</div><div class="state-value">{{ displayData.status }}</div></div>
-  <div class="state-row"><div class="state-label">Adresse</div><div class="state-value">{{ displayData.url }}</div></div>
-  <div class="state-row"><div class="state-label">Tools</div><div class="state-value">{{ displayData.tools|length }}</div></div>
-  {% for tool in displayData.tools %}
-  <div class="state-row"><div class="state-label">{{ tool.name }}</div><div class="state-value">{{ tool.description }}</div></div>
-  {% endfor %}
-</div>
+<section class="sdai-mcp" id="signaldeck-ai-mcp-{{ displayData.hash }}" data-actionhash="{{ displayData.hash }}">
+  <header class="sdai-mcp-header"><h3>MCP-Server · {{ displayData.name }}</h3><span class="sdai-mcp-status">{{ displayData.status }}</span></header>
+  <dl class="sdai-mcp-metadata"><dt>Adresse</dt><dd><code>{{ displayData.url }}</code></dd><dt>Registrierte Tools</dt><dd>{{ displayData.tools|length }}</dd></dl>
+  {% if displayData.instructions %}<details class="sdai-mcp-instructions"><summary>Server-Instructions</summary><pre>{{ displayData.instructions }}</pre></details>{% endif %}
+  {% if not displayData.tools %}<p>Keine MCP-Tools registriert. Prüfe <code>config.mcp_data</code>.</p>{% endif %}
+  <div class="sdai-mcp-tool-list">
+    {% for tool in displayData.tools %}
+    <details class="sdai-mcp-tool" {% if loop.first %}open{% endif %}>
+      <summary><strong>{{ tool.name }}</strong>{% if tool.is_action %} <span class="sdai-mcp-warning">Schreibaktion</span>{% endif %}</summary>
+      <div class="sdai-mcp-tool-body">
+        <p class="sdai-mcp-description">{{ tool.description }}</p>
+        <p><strong>JSON-Eingabeschema</strong></p><pre class="sdai-mcp-schema">{{ tool.input_schema|tojson(indent=2) }}</pre>
+        {% if tool.output_schema %}<details><summary>JSON-Ausgabeschema</summary><pre>{{ tool.output_schema|tojson(indent=2) }}</pre></details>{% endif %}
+        <label class="sdai-mcp-args-label">Aufrufargumente (JSON)
+          <textarea class="sdai-mcp-args" spellcheck="false" rows="5">{% if tool.name == "get_values" %}{"fields":["temp_garten"]}{% elif tool.name == "get_history" %}{"name":"hist_temp_garten","days":7,"include_points":true}{% elif tool.name == "execute_action" %}{"name":"set_temp_garten","arguments":{"temp_garten":23.5}}{% else %}{}{% endif %}</textarea>
+        </label>
+        {% if tool.is_action %}<label class="sdai-mcp-confirm-label"><input type="checkbox" class="sdai-mcp-confirm"> Ich möchte diese Schreibaktion wirklich ausführen.</label>{% endif %}
+        <div class="sdai-mcp-buttons"><button type="button" class="sdai-mcp-execute">Tool ausführen</button> <span class="sdai-mcp-feedback" role="status"></span></div>
+        <div class="sdai-mcp-result-box" hidden><strong>Ergebnis</strong><pre class="sdai-mcp-result" aria-live="polite"></pre></div>
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+</section>
