@@ -77,7 +77,7 @@ def register(app, ctx=None):
     if "signaldeck.ai.processors" in app.extensions:
         return
     if ctx is None:
-        raise RuntimeError("signaldeck-ai requires ApplicationContext")
+        raise RuntimeError("signaldeck-plugin-ai requires ApplicationContext")
     processors = dict(ctx.values.processors)
     app.extensions["signaldeck.ai.processors"] = processors
     app.register_blueprint(bp)
