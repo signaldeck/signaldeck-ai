@@ -161,3 +161,67 @@ def test_token_rejected_without_storing_session():
     with pytest.raises(ChatActionError):
         runtime.verify_and_connect("wrong-secret")
     assert runtime._connections == {}
+
+
+def test_reset_history_starts_fresh_thread_and_clears_agent_context():
+    captured = []
+    factory, requests = make_client(lambda body: (
+        captured.append(body) or [
+            {"type": "RUN_STARTED", "runId": body["runId"]},
+            {"type": "RUN_FINISHED", "outcome": {"type": "success"}},
+        ]
+    ))
+    runtime = ChatRuntime("http://127.0.0.1:8765/ag-ui", http_client_factory=factory)
+    identifier = runtime.verify_and_connect("test-secret")
+    first_run_id = runtime.start_message(identifier, "Alte Nachricht")
+    await_run(runtime.get_run(identifier, first_run_id))
+    first_thread = captured[0]["threadId"]
+    assert captured[0]["messages"][0]["content"] == "Alte Nachricht"
+
+    runtime.new_chat(identifier)
+    with pytest.raises(ChatActionError):
+        runtime.get_run(identifier, first_run_id)
+    assert runtime.contains(identifier)  # Token and connection survive reset
+    assert runtime._connections[identifier].messages == []
+    assert runtime._connections[identifier].pending_interrupt is None
+
+    next_run_id = runtime.start_message(identifier, "Neues Thema")
+    await_run(runtime.get_run(identifier, next_run_id))
+    assert captured[1]["threadId"] != first_thread
+    assert [m["content"] for m in captured[1]["messages"]] == ["Neues Thema"]
+    runtime.shutdown()
+
+
+def test_reset_history_allowed_after_interrupt_and_discards_pending_approval():
+    factory, _ = make_client(lambda body: [
+        {"type": "RUN_STARTED"},
+        {"type": "RUN_FINISHED", "outcome": {
+            "type": "interrupt", "interrupts": [{"id": "obsolete-approval"}]
+        }},
+    ])
+    runtime = ChatRuntime("http://127.0.0.1:8765/ag-ui", http_client_factory=factory)
+    identifier = runtime.verify_and_connect("test-secret")
+    run_id = runtime.start_message(identifier, "Trigger approval")
+    await_run(runtime.get_run(identifier, run_id))
+    assert runtime._connections[identifier].pending_interrupt
+    runtime.new_chat(identifier)
+    assert runtime._connections[identifier].pending_interrupt is None
+    with pytest.raises(ChatActionError, match="Keine passende"):
+        runtime.approve(identifier, "obsolete-approval", "yes")
+    runtime.shutdown()
+
+
+def test_native_reset_history_action_returns_ack_without_rerender(monkeypatch):
+    processor = make_processor()
+    calls = []
+    monkeypatch.setattr(processor.runtime, "new_chat", lambda identifier: calls.append(identifier))
+    app = Flask(__name__)
+    with app.test_request_context(
+        "/run", method="POST", headers={"Origin": "http://localhost"},
+    ):
+        reply = processor.process(
+            ["chat"], "action-hash", ai_action="reset_history", connection_id="opaque"
+        )
+    assert reply == {"ok": True, "history_reset": True}
+    assert calls == ["opaque"]
+    assert "html" not in reply
