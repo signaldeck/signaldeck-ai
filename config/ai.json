@@ -287,7 +287,11 @@
       "name": "agui",
       "class": "signaldeck_ai.chat_processor.AGUIChatProcessor",
       "config": {
-        "endpoint": "http://127.0.0.1:8765/ag-ui"
+        "endpoint": "http://127.0.0.1:8765/ag-ui",
+        "cmd": {
+          "name": "LLM",
+          "timeout_seconds": 120
+        }
       }
     }
   ],
