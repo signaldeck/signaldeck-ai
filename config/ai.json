@@ -24,15 +24,21 @@
         "hist": {
           "temp_garten": {
             "type": "asc",
-            "perDay": 0.35
+            "perDay": 0.35,
+            "interval_minutes": 30,
+            "variation": 2
           },
           "temp_wohnzimmer": {
             "type": "desc",
-            "perDay": 0.08
+            "perDay": 0.08,
+            "interval_minutes": 30,
+            "variation": 0.5
           },
           "temp_keller": {
             "type": "asc",
-            "perDay": 0.03
+            "perDay": 0.03,
+            "interval_minutes": 30,
+            "variation": 0.2
           }
         },
         "export": {
