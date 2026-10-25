@@ -22,7 +22,7 @@ isolation, and MCP must not be exposed to untrusted networks.
 
 ## Local demo / integration setup
 
-The repository root `config/ai.json` defines an operational three-sensor DummyData setup and `config/group_ai.json` provides the DummyData controls plus MCP status and AG-UI chat. `docker-compose.yml` mounts `./config` at `/config`. The Dockerfile installs only the packaged AI plugin and its runtime dependencies; the main plugin is already present in the `signaldeck:dev` base image. Neither `config/` nor `tests/` is packaged in `signaldeck-ai` wheels. The CI builds a wheel and inspects its members to enforce this.
+The repository root `config/ai.json` defines an operational three-sensor DummyData setup and `config/group_ai.json` provides the DummyData controls plus MCP status and AG-UI chat. `docker-compose.yml` mounts `./config` at `/config`. The Dockerfile installs the AI plugin, the merged Socket.IO plugin from `main`, and their runtime dependencies; the main plugin is already present in the `signaldeck:dev` base image. Neither `config/` nor `tests/` is packaged in `signaldeck-ai` wheels. The CI builds a wheel and inspects its members to enforce this.
 
 - **Garten:** 18.5 °C, synthetic trend of +0.35 °C per day, with 2.0 °C daily variation.
 - **Wohnzimmer:** 21.3 °C, synthetic trend of −0.08 °C per day, with 0.5 °C daily variation.
@@ -128,14 +128,43 @@ Socket.IO encryption remains end-to-end and opaque: encrypted payloads
 without a matching cleartext `@haus` prefix never reach this bridge.
 Do not provide room keys to SignalDeck or cli-agent.
 
-The AI demo config includes the optional bridge settings but its Docker
-image does **not** install the Socket.IO plugin. To test the full flow,
-install both plugins into the same SignalDeck instance, merge the room
-routes into its Socket.IO processor, and manually connect an AI Chat
-view using a cli-agent bearer token first. Interactive tool approvals
-are not granted automatically. Limit the agent's configured tools to
-suitably trusted room participants; Socket.IO client `id` alone is not
-strong authentication.
+The development Docker image now installs the merged Socket.IO plugin
+alongside the AI plugin. `config/ai.json` configures a non-persistent
+Socket.IO room `haus` and both directions of message routing; the
+`config/group_ai.json` group shows **Socket.IO – Übersicht** and
+**Socket.IO – Haus**. The latter is a *server administration view*, not
+a client chat interface. Messages sent using its server-side Send button
+do not trigger `incoming_message_routes`: those only run for
+authenticated Socket.IO **client** `send_event` calls.
+
+To exercise the complete integration:
+
+1. Start `cli-agent-api` (port 8765) with access to the SignalDeck demo
+   MCP server at `http://127.0.0.1:8766/mcp`.
+2. Run `docker compose up --build` in this repository.
+3. Open **Agenten-Chat Energie** or **Agenten-Chat Haus** in SignalDeck,
+   enter the cli-agent bearer token and press **Verbinden**.
+4. From your host terminal, install the demo test client's dependency
+   (`python -m pip install "python-socketio[client]>=5.12,<6"`)
+   and run:
+
+   ```sh
+   python scripts/test_socketio_ai.py "@haus Wie warm ist es im Garten?"
+   ```
+
+The test client connects to `http://127.0.0.1:5000`, joins the
+un-encrypted `haus` room, sends a genuine client-originated
+`send_event`, and prints the assistant reply. Use `--url`, `--room`
+or `--timeout` to adjust target and wait time. Without a prior Chat UI
+login, the bridge returns an authentication-related message. Normal
+messages without `@haus` are not forwarded to the AI bridge and will
+not generate a response.
+
+Interactive tool approvals are not granted automatically. Limit the
+agent's configured tools to suitably trusted room participants; the
+Socket.IO client's claimed `id` is not strongly authenticated. The
+demo's permissive Socket.IO CORS setting and `network_mode: host`
+are for trusted development networks, not public deployment.
 
 ## Optional one-shot LLM Cmd
 
