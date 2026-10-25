@@ -46,13 +46,16 @@ def test_real_dummy_data_exports_and_selected_values(demo):
 def test_dummy_historical_temperature_is_synthetic(demo):
     dummy, mcp, provider, _ = demo
     history = mcp.read_history("hist_temp_garten", days=7, include_points=True)
-    assert history["statistics"]["count"] == 7
-    assert len(history["points"]) == 7
+    assert 6 * 48 <= history["statistics"]["count"] <= 7 * 48
+    assert len(history["points"]) == 200  # bounded default sample
+    assert history["sampled"] is True
+    assert history["total_points"] == history["statistics"]["count"]
     assert history["statistics"]["minimum"] < history["statistics"]["maximum"]
     assert all(datetime.fromisoformat(point["time"]) for point in history["points"])
-    assert all(point["time_inferred"] is True for point in history["points"])
+    assert all("time_inferred" not in point for point in history["points"])
     assert all(not point["time"].startswith("day-") for point in history["points"])
-    assert mcp.read_history("hist_temp_wohnzimmer", days=2)["statistics"]["count"] == 2
+    assert len({point["time"][:10] for point in history["points"]}) >= 6
+    assert 48 <= mcp.read_history("hist_temp_wohnzimmer", days=2)["statistics"]["count"] <= 96
     with pytest.raises(ValueError):
         mcp.read_history("unknown_method", days=1)
 
