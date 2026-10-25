@@ -12,7 +12,7 @@ from signaldeck_ai.mcp_server import MCPRuntime
 
 class FakeCmd:
     def __init__(self):
-        self.commands = {"echo": object(), "sleep": object()}
+        self.commands = {"echo": object(), "sleep": object(), "socketio_send": object()}
         self.alias = {}
         self.script = {"demo_abend": SimpleNamespace(variables=[])}
         self.tasks = {}
@@ -185,3 +185,102 @@ def test_script_args_require_defined_script_variables():
     cmd = FakeCmd()
     with pytest.raises(ValueError, match="unknown script variable"):
         registry.bind(cmd)
+
+
+def _send_haus_spec():
+    return {
+        "name": "send_haus",
+        "description": "Send a message to the fixed Socket.IO room haus",
+        "command": "socketio_send",
+        "args": ["haus", {"param": "msg"}],
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "msg": {
+                    "type": "string",
+                    "description": "Text to be sent to the haus room",
+                    "minLength": 1,
+                    "maxLength": 500,
+                }
+            },
+            "required": ["msg"],
+            "additionalProperties": False,
+        },
+    }
+
+
+def test_socketio_message_maps_free_text_to_fixed_room():
+    registry = RunActions([_send_haus_spec()])
+    cmd = FakeCmd()
+    registry.bind(cmd)
+    message = "Hallo aus SignalDeck! 😀 Wie läuft's?"
+    assert registry.execute("send_haus", {"msg": message}) == {
+        "name": "send_haus", "status": "scheduled",
+    }
+    assert cmd.calls[0][1] == ["socketio_send haus " + message]
+    assert cmd.calls[0][2].startswith("mcp-run-")
+
+
+@pytest.mark.parametrize("message", [
+    "", " ", " führendes Leerzeichen", "Leerzeichen am Ende ",
+    "erste Zeile\nzweite Zeile", "Zeile\rweiter",
+    "Tab\tZeichen", "ESC\x1b[31m", "Null\x00Byte",
+    "Bidi\u202eOverride", "Nullbreite\u200bZeichen",
+    "x" * 501,
+])
+def test_free_text_rejects_controls_and_excessive_length(message):
+    registry = RunActions([_send_haus_spec()])
+    cmd = FakeCmd()
+    registry.bind(cmd)
+    with pytest.raises((ValueError, ValidationError)):
+        registry.execute("send_haus", {"msg": message})
+    assert not cmd.calls
+
+
+def test_free_text_allows_printable_punctuation_without_executing_commands():
+    registry = RunActions([_send_haus_spec()])
+    cmd = FakeCmd()
+    registry.bind(cmd)
+    message = "Preis: 12,50 €; Status = 'OK' (alles gut)."
+    registry.execute("send_haus", {"msg": message})
+    assert cmd.calls[0][1] == ["socketio_send haus " + message]
+    assert len(cmd.calls) == 1
+
+
+def test_free_text_without_bounded_max_length_is_rejected():
+    cfg = _send_haus_spec()
+    del cfg["parameters"]["properties"]["msg"]["maxLength"]
+    with pytest.raises(ValueError, match="maxLength"):
+        RunActions([cfg])
+
+
+@pytest.mark.parametrize("limit", [0, -1, 501, 1.5, True])
+def test_free_text_rejects_invalid_max_length(limit):
+    cfg = _send_haus_spec()
+    cfg["parameters"]["properties"]["msg"]["maxLength"] = limit
+    with pytest.raises(ValueError, match="maxLength"):
+        RunActions([cfg])
+
+
+def test_free_text_only_as_last_command_argument():
+    cfg = _send_haus_spec()
+    cfg["args"] = [{"param": "msg"}, "haus"]
+    with pytest.raises(ValueError, match="final Cmd argument"):
+        RunActions([cfg])
+
+
+def test_free_text_not_supported_for_script_macro_expansion():
+    cfg = _send_haus_spec()
+    cfg.pop("command")
+    cfg.pop("args")
+    cfg["script"] = "demo_abend"
+    cfg["variables"] = {"msg": {"param": "msg"}}
+    with pytest.raises(ValueError, match="Cmd commands"):
+        RunActions([cfg])
+
+
+def test_legacy_unbounded_string_schema_stays_invalid():
+    cfg = _send_haus_spec()
+    cfg["parameters"]["properties"]["msg"] = {"type": "string"}
+    with pytest.raises(ValueError):
+        RunActions([cfg])
