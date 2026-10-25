@@ -7,7 +7,7 @@ generic **AG-UI 1.0 chat interface**.
 
 This uses the same container layout as `signaldeck-plugin-socketio`:
 `Dockerfile`, `docker-compose.yml`, `config/`, `plugins/` and logging.
-The image is derived from locally available `signaldeck:dev`.
+The image is derived from locally available `signaldeck:dev` (including `signaldeck-plugin-main`).
 
 ```sh
 docker compose up --build
@@ -16,9 +16,22 @@ docker compose up --build
 The Compose service uses `network_mode: host` on Linux. This permits
 SignalDeck to reach `cli-agent-api` at `127.0.0.1:8765` despite that
 API's deliberate loopback-only binding. The SignalDeck website still
-runs on its standard port 5000. The MCP example listens at
+runs on its standard port 5000. The interactive demo uses `signaldeck-plugin-main` DummyData to publish three mocked temperatures (Garten, Wohnzimmer, Keller), daily synthetic temperature history and an opt-in action changing **only** the dummy garden temperature. The MCP example listens at
 `127.0.0.1:8766/mcp`. Host networking does not provide network
 isolation, and MCP must not be exposed to untrusted networks.
+
+## Local demo / integration setup
+
+The repository root `config/ai.json` defines an operational three-sensor DummyData setup and `config/group_ai.json` provides the DummyData controls plus MCP status and AG-UI chat. `docker-compose.yml` mounts `./config` at `/config`. The Dockerfile installs only the packaged AI plugin and its runtime dependencies; the main plugin is already present in the `signaldeck:dev` base image. Neither `config/` nor `tests/` is packaged in `signaldeck-ai` wheels. The CI builds a wheel and inspects its members to enforce this.
+
+- **Garten:** 18.5 °C, synthetically changes by +0.35 °C per day into the past.
+- **Wohnzimmer:** 21.3 °C, synthetically changes by −0.08 °C per day into the past.
+- **Keller:** 17.8 °C, synthetically changes by +0.03 °C per day into the past.
+- **Test action:** `set_temp_garten` changes only the simulated garden temperature, through the DummyData processor. No real hardware connection is configured.
+
+Use `get_values({"fields": ["temp_garten"]})`, `get_history({"name": "hist_temp_garten", "days": 7, "include_points": true})` or `execute_action({"name": "set_temp_garten", "arguments": {"temp_garten": 23.5}})` from a connected MCP client. Action calls can also exercise cli-agent approvals without affecting real devices.
+
+The integration tests under `tests/test_demo_config.py` use the **real** DummyData and SDK ValueProvider, rather than a test-only replica. They verify current values, historical reads, the mock write action, and MCP tool discovery. An actual live Docker/cli-agent/AG-UI test still needs to be carried out on the target environment.
 
 ## Startup
 
