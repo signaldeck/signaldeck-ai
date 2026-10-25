@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from flask import request
 from jsonschema import ValidationError
 from threading import RLock
@@ -192,11 +193,17 @@ class MCPServerProcessor(DisplayProcessor):
         # method, as elsewhere in SignalDeck.
         binding = self._method_bindings[name]
         provider_method = binding["from"]
+        # Capture a single reference clock for all inferred daily samples.
+        # Real timestamps returned by a data store remain unchanged.
+        reference_time = datetime.now(timezone.utc)
         with self._read_lock:
             points = []
             if spec.get("mode", "per_day") == "range":
                 result = self.valueProvider.getMethodValue(provider_method, days=days)
-                points.extend(series_points(result, day=days))
+                points.extend(series_points(
+                    result, day=days, reference_time=reference_time,
+                    allow_scalar=False,
+                ))
             else:
                 # PersistData.hist(days=N, fullDay=True) returns one day at
                 # offset N; iterate to collect a complete window.
@@ -204,8 +211,12 @@ class MCPServerProcessor(DisplayProcessor):
                     result = self.valueProvider.getMethodValue(
                         provider_method, days=offset, fullDay=True
                     )
-                    points.extend(series_points(result, day=offset))
-        points.sort(key=lambda row: str(row["time"]))
+                    points.extend(series_points(
+                        result, day=offset, reference_time=reference_time,
+                    ))
+        # Date/time strings are ISO 8601. Do not reassign the timezone of
+        # measurements from the source; scalar dummy points are UTC.
+        points.sort(key=lambda row: row["time"])
         output = {
             "name": name,
             "description": spec["description"],
