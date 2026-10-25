@@ -312,7 +312,7 @@ to at most 1000 points). Individual history mappings can restrict
 the permitted `max_days`.
 
 Use `mode=range` for exported methods that already support
-`date=YYYY-MM-DD` as the inclusive end date and `days=N` as the number of days up to and including that date.
+`date=YYYY-MM-DD` as the inclusive start date and `days=N` as the number of days from that date onward.
 
 History entries always use ISO 8601 date/time strings (for example,
 `2026-10-23T09:10:00+00:00`) rather than synthetic `day-0` labels.
@@ -573,14 +573,14 @@ instance, MCP server and cli-agent-api.
 ### Date-based history calls
 
 `get_history` requires `date` in ISO calendar format (`YYYY-MM-DD`).
-`days` is now the number of days **ending on that explicit date**
+`days` is now the number of days **starting on that explicit date**
 (default 1), not a relative offset from now. Example:
 
 ```json
 {"name":"hist_temp_garten","date":"2026-10-20","days":2,"include_points":true}
 ```
 
-This selects October 19 and October 20. Each selected day is dispatched
+This selects October 20 and October 21. Each selected day is dispatched
 through the existing SignalDeck `hist(date=<that day>, days=0,
 fullDay=True)` API: the underlying `days` argument is an offset, hence
 **must remain zero** to avoid accidentally selecting an earlier day.
