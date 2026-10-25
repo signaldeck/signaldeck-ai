@@ -78,7 +78,7 @@ def test_runtime_offers_only_three_stable_tools(demo):
     assert runtime.mcp.instructions == mcp.config["mcp"]["instructions"]
     assert set(runtime.mcp._tool_manager.list_tools()[i].name
                for i in range(len(runtime.mcp._tool_manager.list_tools()))) == {
-        "get_values", "get_history", "execute_action"
+        "get_values", "get_history", "execute_action", "run"
     }
 
 
