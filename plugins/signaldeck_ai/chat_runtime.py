@@ -104,6 +104,57 @@ class ChatRuntime:
         self._connections: dict[str, AgentConnection] = {}
         self._views: dict[str, str] = {}
 
+    @staticmethod
+    def normalize_view(value: Any) -> str:
+        if isinstance(value, (list, tuple)):
+            if len(value) != 1:
+                raise ChatActionError("Chat-View erwartet genau einen value.")
+            value = value[0]
+        if not isinstance(value, str) or not value.strip() or len(value) > 128:
+            raise ChatActionError("Chat-value muss eine nichtleere Zeichenkette sein.")
+        return value
+
+    def assert_view(self, key: str, identifier: str) -> None:
+        with self._lock:
+            connection = self._connection_locked(identifier)
+            if connection.view_key != key:
+                raise ChatActionError("Verbindung gehört zu einer anderen Chat-View.")
+
+    def view_state(self, key: str) -> dict[str, Any]:
+        """A shared view's conversation snapshot; never exposes the API token."""
+        with self._lock:
+            self._expire_locked()
+            identifier = self._views.get(key)
+            connection = self._connections.get(identifier) if identifier else None
+            if connection is None or connection.revoked:
+                return {"connected": False, "messages": [], "busy": False}
+
+            connection.last_used = time.monotonic()
+            messages = [
+                {"role": msg["role"], "content": msg["content"]}
+                for msg in connection.messages
+                if msg["role"] in {"user", "assistant"}
+            ]
+            current = connection.runs.get(connection.current_run)
+            busy = bool(current and not current.finalized)
+            if busy:
+                with current.changed:
+                    partial = current.answer + "".join(current._message_fragments.values())
+                if partial:
+                    messages.append({"role": "assistant", "content": partial})
+            pending = connection.pending_interrupt
+            return {
+                "connected": True,
+                "connection_id": identifier,
+                "messages": messages,
+                "busy": busy,
+                "pending_interrupt": ({
+                    "id": pending.get("id"),
+                    "message": pending.get("message"),
+                    "reason": pending.get("reason"),
+                } if pending else None),
+            }
+
     def _expire_locked(self) -> None:
         now = time.monotonic()
         for ident, connection in tuple(self._connections.items()):
