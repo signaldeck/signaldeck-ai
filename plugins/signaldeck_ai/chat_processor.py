@@ -38,6 +38,7 @@ class AGUIChatProcessor(DisplayProcessor):
             raise ValueError("AG-UI endpoint requires a TCP port")
         self.endpoint = endpoint if parsed.path == "/ag-ui" else endpoint + "/ag-ui"
         self.runtime = ChatRuntime(self.endpoint)
+        # A configured view value identifies one shared chat within this processor.
 
     def getTemplate(self, value):
         return "ai/chat.html"
