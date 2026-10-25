@@ -1,5 +1,6 @@
 """Integration tests: real main-plugin DummyData -> SDK ValueProvider -> MCP."""
 import json
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -48,6 +49,9 @@ def test_dummy_historical_temperature_is_synthetic(demo):
     assert history["statistics"]["count"] == 7
     assert len(history["points"]) == 7
     assert history["statistics"]["minimum"] < history["statistics"]["maximum"]
+    assert all(datetime.fromisoformat(point["time"]) for point in history["points"])
+    assert all(point["time_inferred"] is True for point in history["points"])
+    assert all(not point["time"].startswith("day-") for point in history["points"])
     assert mcp.read_history("hist_temp_wohnzimmer", days=2)["statistics"]["count"] == 2
     with pytest.raises(ValueError):
         mcp.read_history("unknown_method", days=1)
