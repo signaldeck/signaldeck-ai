@@ -6,6 +6,7 @@ from flask import request
 from signaldeck_sdk import DisplayProcessor, DisplayData
 
 from .chat_runtime import ChatActionError, ChatRuntime
+from .llm_command import LLMCommand
 
 
 class ChatDisplayData(DisplayData):
@@ -40,6 +41,24 @@ class AGUIChatProcessor(DisplayProcessor):
         self.endpoint = endpoint if parsed.path == "/ag-ui" else endpoint + "/ag-ui"
         self.runtime = ChatRuntime(self.endpoint)
         # A configured view value identifies one shared chat within this processor.
+
+    def registerCommands(self, cmd):
+        config = self.config.get("cmd")
+        if config is None:
+            return
+        if not isinstance(config, dict) or set(config) - {"name", "timeout_seconds"}:
+            raise ValueError("AGUI cmd configuration supports name and timeout_seconds")
+        name = config.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("AGUI cmd.name is required")
+        # Cmd.registerCmd normally silently replaces an existing name.
+        # For per-instance LLM commands this is an invalid configuration.
+        if name in cmd.commands:
+            raise ValueError(f"Cmd '{name}' already registered by another processor")
+        cmd.registerCmd(LLMCommand(
+            name, self.runtime,
+            timeout_seconds=config.get("timeout_seconds", 120),
+        ))
 
     def getTemplate(self, value):
         return "ai/chat.html"
