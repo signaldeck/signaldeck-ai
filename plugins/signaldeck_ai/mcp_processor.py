@@ -13,7 +13,7 @@ from signaldeck_sdk import DisplayProcessor, DisplayData
 
 from .mcp_server import MCPRuntime
 from .run_actions import RunActions
-from .serialization import bounded_sample, json_safe, series_points, summarize_points
+from .serialization import bounded_sample, json_safe, merge_history_points, series_points, summarize_points
 
 
 class MCPDisplayData(DisplayData):
@@ -244,6 +244,32 @@ class MCPServerProcessor(DisplayProcessor):
                     points.extend(series_points(
                         result, day=0, sample_date=requested_day,
                     ))
+
+            # Only the current calendar day can contain measurements that
+            # have not yet reached the persistent store. PersistData.hist
+            # exposes its in-memory deque via currentValues=True.
+            if first_day <= datetime.now().date() <= end_day:
+                try:
+                    cached = self.valueProvider.getMethodValue(
+                        provider_method, currentValues=True,
+                    )
+                    cache_points = series_points(
+                        cached, day=0, allow_scalar=False,
+                    )
+                except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                    # Optional cache support must not break a valid persistent
+                    # history read (e.g. DummyData returns a scalar).
+                    self.logger.debug(
+                        "No compatible timestamped history cache for %s: %s",
+                        name, exc,
+                    )
+                else:
+                    today = datetime.now().date()
+                    cache_points = [
+                        point for point in cache_points
+                        if datetime.fromisoformat(point["time"]).date() == today
+                    ]
+                    points = merge_history_points(points, cache_points)
 
         # Keep source measurement timestamps unchanged. Scalar values without
         # timestamps are explicitly marked as inferred at the requested date.
