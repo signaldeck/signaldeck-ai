@@ -38,7 +38,7 @@ def invoke(processor, **params):
 def test_catalog_is_actual_registered_mcp_tool_schema(console_processor):
     processor, _ = console_processor
     tools = {t["name"]: t for t in processor.registered_tool_catalog()}
-    assert set(tools) == {"get_values", "get_history", "execute_action"}
+    assert set(tools) == {"get_values", "get_history", "execute_action", "run"}
     assert "fields" in tools["get_values"]["input_schema"]["properties"]
     assert "name" in tools["get_history"]["input_schema"]["properties"]
     history_description = tools["get_history"]["description"]
