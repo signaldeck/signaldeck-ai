@@ -97,7 +97,7 @@
           "name": "signaldeck-climate-demo",
           "host": "127.0.0.1",
           "port": 8766,
-          "instructions": "Dieser MCP-Server liefert ausschließlich simulierte Temperaturwerte aus SignalDeck. get_values liest aktuelle Werte, get_history liefert synthetische tägliche historische Werte. Mit execute_action darf nur die simulierte Gartentemperatur verändert werden; echte Geräte sind nicht angebunden. Frage nur benötigte Felder ab."
+          "instructions": "Dieser MCP-Server liefert ausschließlich simulierte Temperaturwerte aus SignalDeck. get_values liest aktuelle Werte, get_history liefert synthetische tägliche historische Werte. Mit execute_action darf nur die simulierte Gartentemperatur verändert werden; echte Geräte sind nicht angebunden. Frage nur benötigte Felder ab. Für Steuerungsaktionen verwende ausschließlich run mit den konfigurierten öffentlichen Namen."
         },
         "values": [
           {
@@ -192,6 +192,67 @@
                 "additionalProperties": false
               }
             }
+          ],
+          "runs": [
+            {
+              "name": "Abend",
+              "description": "Demo-Abendmodus starten (nur eine ungefährliche Echo-Meldung, keine realen Geräte).",
+              "script": "demo_abend"
+            },
+            {
+              "name": "Testmeldung",
+              "description": "Eine ungefährliche Testmeldung mit begrenzter Anzahl ausgeben.",
+              "command": "echo",
+              "args": [
+                "MCP_Testmeldung",
+                {
+                  "param": "nummer"
+                }
+              ],
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "nummer": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "Testnummer 1 bis 5"
+                  }
+                },
+                "required": [
+                  "nummer"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "Temperaturhinweis",
+              "description": "Ein Demo-Skript mit einer begrenzten Temperaturstufe starten.",
+              "script": "demo_hinweis",
+              "variables": {
+                "stufe": {
+                  "param": "stufe"
+                }
+              },
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "stufe": {
+                    "type": "string",
+                    "enum": [
+                      "kalt",
+                      "warm",
+                      "heiss"
+                    ],
+                    "description": "Einer der drei freigegebenen Hinweise"
+                  }
+                },
+                "required": [
+                  "stufe"
+                ],
+                "additionalProperties": false
+              }
+            }
           ]
         }
       }
@@ -212,6 +273,27 @@
   ],
   "cmd": {
     "alias": [],
-    "script": []
+    "script": [
+      {
+        "name": "demo_abend",
+        "commands": [
+          "echo Abendmodus_Demo"
+        ],
+        "variables": []
+      },
+      {
+        "name": "demo_hinweis",
+        "commands": [
+          "echo Temperaturhinweis_$stufe$"
+        ],
+        "variables": [
+          {
+            "name": "stufe",
+            "type": "str",
+            "default": "warm"
+          }
+        ]
+      }
+    ]
   }
 }
