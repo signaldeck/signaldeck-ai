@@ -17,7 +17,8 @@
     const approvals = root.querySelector(".sdai-approval");
     const approvalText = root.querySelector(".sdai-approval-text");
     const form = root.querySelector(".sdai-form");
-    let connectionId = null, busy = false, interrupt = null;
+    let connectionId = null, busy = false, remoteBusy = false, interrupt = null;
+    let lastMessages = null, lastThread = null, refreshing = false;
 
     function render(role, value) {
       const node = document.createElement("div");
@@ -34,10 +35,10 @@
       connect.disabled = busy;
       tokenField.hidden = connected;
       tokenField.disabled = connected || busy;
-      field.disabled = !connected || busy || Boolean(interrupt);
-      send.disabled = !connected || busy || Boolean(interrupt);
-      fresh.disabled = !connected || busy;
-      status.textContent = busy ? "Agent arbeitet ..." :
+      field.disabled = !connected || busy || remoteBusy || Boolean(interrupt);
+      send.disabled = !connected || busy || remoteBusy || Boolean(interrupt);
+      fresh.disabled = !connected || busy || remoteBusy;
+      status.textContent = (busy || remoteBusy) ? "Agent arbeitet ..." :
         connected ? (interrupt ? "Freigabe erforderlich" : "Verbunden") : "Nicht verbunden";
     }
 
@@ -59,6 +60,38 @@
       return result;
     }
 
+    async function syncState() {
+      // SignalDeck has no browser user sessions. All browsers opening the same
+      // configured view value intentionally share a server-side agent thread.
+      if (busy || refreshing || !root.isConnected) return;
+      refreshing = true;
+      try {
+        const state = await action("state");
+        const previousConnection = connectionId;
+        connectionId = state.connected ? state.connection_id : null;
+        remoteBusy = Boolean(state.busy);
+        const messages = state.messages || [];
+        const serialized = JSON.stringify(messages);
+        if (serialized !== lastMessages || previousConnection !== connectionId) {
+          transcript.replaceChildren();
+          for (const msg of messages) render(msg.role, msg.content);
+          lastMessages = serialized;
+        }
+        interrupt = state.pending_interrupt || null;
+        if (interrupt) {
+          approvalText.textContent = interrupt.message || ("Freigabe: " + (interrupt.reason || "Tool"));
+          approvals.hidden = false;
+        } else {
+          approvals.hidden = true;
+        }
+        updateUI();
+      } catch (error) {
+        // The next poll can recover after a transient /run failure.
+      } finally {
+        refreshing = false;
+      }
+    }
+
     connect.addEventListener("click", async () => {
       if (busy) return;
       busy = true;
@@ -69,6 +102,7 @@
           connectionId = null;
           interrupt = null;
           transcript.replaceChildren();
+          lastMessages = null;
           approvals.hidden = true;
         } else {
           const token = tokenField.value.trim();
@@ -77,6 +111,8 @@
           connectionId = result.connection_id;
           if (!connectionId) throw new Error("Verbindungskennung fehlt.");
           tokenField.value = "";
+          lastMessages = null;
+          await syncState();
         }
       } catch (err) {
         render("info", "Verbindung: " + String(err.message || err));
@@ -100,11 +136,13 @@
         interrupt = null;
         approvals.hidden = true;
         transcript.replaceChildren();
+        lastMessages = null;
       } catch (err) {
         render("info", "Verlauf zurücksetzen: " + String(err.message || err));
       } finally {
         busy = false;
         updateUI();
+        void syncState();
       }
     });
 
@@ -194,6 +232,7 @@
       } finally {
         busy = false;
         updateUI();
+        void syncState();
       }
     }
 
@@ -225,11 +264,20 @@
         } finally {
           busy = false;
           updateUI();
+          void syncState();
         }
       })();
     });
 
     updateUI();
+    void syncState();
+    const poll = window.setInterval(() => {
+      if (!root.isConnected) {
+        window.clearInterval(poll);
+        return;
+      }
+      void syncState();
+    }, 1800);
   }
 
   window.initSignalDeckAIChat = initSignalDeckAIChat;
