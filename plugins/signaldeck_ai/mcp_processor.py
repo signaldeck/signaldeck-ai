@@ -291,6 +291,44 @@ class MCPServerProcessor(DisplayProcessor):
             output["total_points"] = len(points)
         return output
 
+    def read_historical_value(self, name: str, *, date: str) -> dict[str, Any]:
+        """Look up one historical value at a required local date AND time.
+
+        PersistData.hist(fullDay=False) selects the datastore's best
+        historical value for the supplied instant; it does not guarantee
+        a measurement with precisely that timestamp.
+        """
+        if name not in self.history_specs:
+            raise ValueError("Unknown or unauthorized data row")
+        spec = self.history_specs[name]
+        if spec.get("mode", "per_day") != "per_day":
+            raise ValueError("Point-in-time lookup requires a per-day history method")
+        if not isinstance(date, str) or len(date) != 19:
+            raise ValueError("date must include a time in YYYY-MM-DDTHH:MM:SS format")
+        try:
+            requested = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S")
+        except ValueError as exc:
+            raise ValueError("date must include a valid time in YYYY-MM-DDTHH:MM:SS format") from exc
+        if requested.strftime("%Y-%m-%dT%H:%M:%S") != date:
+            raise ValueError("date must include a valid time in YYYY-MM-DDTHH:MM:SS format")
+        if requested > datetime.now():
+            raise ValueError("Future history dates are not permitted")
+
+        provider_method = self._method_bindings[name]["from"]
+        with self._read_lock:
+            result = self.valueProvider.getMethodValue(
+                provider_method, date=requested, days=0, fullDay=False,
+            )
+        output = {
+            "name": name,
+            "description": spec["description"],
+            "requested_time": date,
+            "value": json_safe(result),
+        }
+        if "unit" in spec:
+            output["unit"] = spec["unit"]
+        return output
+
     def execute_action(self, name: str, arguments: dict[str, Any]) -> Any:
         if name not in self.action_specs:
             raise ValueError("Unknown or unauthorized action")
