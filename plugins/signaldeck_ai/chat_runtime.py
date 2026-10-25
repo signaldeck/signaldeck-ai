@@ -39,6 +39,7 @@ class AgentRun:
     )
     next_sequence: int = 1
     done: bool = False
+    finalized: bool = False
     interrupted: bool = False
     failed: bool = False
     answer: str = ""
@@ -80,6 +81,7 @@ class AgentRun:
 @dataclass
 class AgentConnection:
     token: str = field(repr=False)
+    view_key: str | None = None
     thread_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     messages: list[dict[str, Any]] = field(default_factory=list, repr=False)
     runs: dict[str, AgentRun] = field(default_factory=dict, repr=False)
@@ -100,6 +102,7 @@ class ChatRuntime:
         self._client_factory = http_client_factory
         self._lock = threading.RLock()
         self._connections: dict[str, AgentConnection] = {}
+        self._views: dict[str, str] = {}
 
     def _expire_locked(self) -> None:
         now = time.monotonic()
