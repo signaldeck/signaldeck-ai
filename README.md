@@ -204,6 +204,40 @@ Example (inside the MCP processor's `config.mcp_data`):
 }
 ```
 
+A Socket.IO message action can fix its destination room while allowing the
+LLM to supply the message text. With the actual
+`signaldeck-plugin-socketio` command **`socketio_send`**, configure:
+
+```json
+{
+  "name": "send_haus",
+  "description": "Sende eine Textnachricht an den Raum haus.",
+  "command": "socketio_send",
+  "args": ["haus", {"param": "msg"}],
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "msg": {
+        "type": "string",
+        "description": "Eine kurze Nachricht an den Haus-Chat",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    },
+    "required": ["msg"],
+    "additionalProperties": false
+  }
+}
+```
+
+Then the public call
+`run({"name": "send_haus", "arguments": {"msg": "Hallo aus SignalDeck!"}})`
+starts `socketio_send haus Hallo aus SignalDeck!`. The room name cannot be
+changed by the LLM, and the Cmd name is never exposed as an argument.
+This requires that the Socket.IO plugin is installed and its command
+registered before the MCP processor is initialized. The AI demo does not
+install Socket.IO, so its `Nachricht` action uses safe `echo` instead.
+
 The example `licht` command and `abendmodus` script must be defined in
 SignalDeck separately; neither is installed by this plugin. The actual
 repository demo instead uses harmless built-in `echo` commands and scripts.
@@ -219,11 +253,17 @@ Configuration rules:
   Each argument is either a fixed literal or `{"param":"..." }`.
 - A script uses a fixed existing script and optional `variables` mapping.
   Every passed variable must exist in its ScriptDefinition.
-- Every exposed parameter must be required. String arguments only permit
-  explicitly enumerated **single safe tokens**. Numeric arguments need
-  finite bounds or an enum. Unexpected properties are forbidden. This is
-  deliberately stricter than general-purpose JSON Schema because Cmd
-  interpolates parameters into command text.
+- Every exposed parameter must be required. By default, string
+  parameters require explicitly enumerated **single safe tokens**.
+  For actual natural-language text, opt in with `minLength` (optional,
+  default 1) and `maxLength` (mandatory, 1–500). The text must be
+  nonempty, printable, without control/format characters, newlines or
+  leading/trailing whitespace. Such free text is accepted only as the
+  **last argument of a Cmd command** that supports joining trailing words;
+  free text is not allowed in script variables. Numeric arguments need
+  finite bounds or an enum. Unexpected properties are forbidden.
+  SignalDeck Cmd uses space-separated arguments rather than shell execution,
+  so only commands designed for multiword text are appropriate.
 - Cmd/script targets and their source strings never appear in the tool's
   public descriptions. The LLM cannot upload script text or submit arbitrary
   command lines.
