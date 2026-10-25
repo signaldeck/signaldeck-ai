@@ -18,12 +18,21 @@
     ]
   },
   {
-    "name": "Agenten-Chat",
-    "element": "AG-UI Chat",
+    "name": "Agenten-Chat Energie",
+    "element": "AG-UI Energie",
     "type": "agui",
     "fa": "fas fa-comments",
     "value": [
-      "chat"
+      "energie"
+    ]
+  },
+  {
+    "name": "Agenten-Chat Haus",
+    "element": "AG-UI Haussteuerung",
+    "type": "agui",
+    "fa": "fas fa-comments",
+    "value": [
+      "haussteuerung"
     ]
   }
 ]
