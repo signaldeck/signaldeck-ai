@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date as calendar_date, datetime, time, timedelta
 from flask import request
 from jsonschema import ValidationError
 from threading import RLock
@@ -188,48 +188,70 @@ class MCPServerProcessor(DisplayProcessor):
             return result
 
     def read_history(
-        self, name: str, *, days: int = 1,
+        self, name: str, *, date: str, days: int = 1,
         include_points: bool = False, max_points: int = 200,
     ) -> dict[str, Any]:
+        """Read a date-anchored span, ending on the requested calendar day.
+
+        PersistData.hist subtracts `days` from `date`: consequently each
+        individual day must be queried with days=0 and fullDay=True.
+        The days parameter of *this* method is instead a window length.
+        """
         if name not in self.history_specs:
             raise ValueError("Unknown or unauthorized data row")
         spec = self.history_specs[name]
+        if not isinstance(date, str) or len(date) != 10:
+            raise ValueError("date must be a calendar date in YYYY-MM-DD format")
+        try:
+            target_day = calendar_date.fromisoformat(date)
+        except ValueError as exc:
+            raise ValueError("date must be a valid calendar date in YYYY-MM-DD format") from exc
+        if target_day.isoformat() != date:
+            raise ValueError("date must be a calendar date in YYYY-MM-DD format")
+        if target_day > datetime.now().date():
+            raise ValueError("Future history dates are not permitted")
         if type(days) is not int or not 1 <= days <= spec.get("max_days", 30):
             raise ValueError("Requested history range is not permitted")
         if type(max_points) is not int or not 1 <= max_points <= 1000:
             raise ValueError("max_points must be between 1 and 1000")
+        try:
+            first_day = target_day - timedelta(days=days - 1)
+        except OverflowError as exc:
+            raise ValueError("Requested history range is outside valid dates") from exc
 
-        # config.methods maps the local 'func' to the exported ValueProvider
-        # method, as elsewhere in SignalDeck.
         binding = self._method_bindings[name]
         provider_method = binding["from"]
-        # Capture a single reference clock for all inferred daily samples.
-        # Real timestamps returned by a data store remain unchanged.
-        reference_time = datetime.now(timezone.utc)
         with self._read_lock:
             points = []
             if spec.get("mode", "per_day") == "range":
-                result = self.valueProvider.getMethodValue(provider_method, days=days)
-                points.extend(series_points(
-                    result, day=days, reference_time=reference_time,
-                    allow_scalar=False,
-                ))
+                # Custom range methods (unlike PersistData.hist) must accept
+                # the explicit inclusive end date and window length, and
+                # return timestamped records. They never receive an offset.
+                result = self.valueProvider.getMethodValue(
+                    provider_method,
+                    date=datetime.combine(target_day, time.min), days=days,
+                )
+                points.extend(series_points(result, day=0, allow_scalar=False))
             else:
-                # PersistData.hist(days=N, fullDay=True) returns one day at
-                # offset N; iterate to collect a complete window.
                 for offset in range(days):
+                    requested_day = target_day - timedelta(days=offset)
                     result = self.valueProvider.getMethodValue(
-                        provider_method, days=offset, fullDay=True
+                        provider_method,
+                        date=datetime.combine(requested_day, time.min),
+                        days=0, fullDay=True,
                     )
                     points.extend(series_points(
-                        result, day=offset, reference_time=reference_time,
+                        result, day=0, sample_date=requested_day,
                     ))
-        # Date/time strings are ISO 8601. Do not reassign the timezone of
-        # measurements from the source; scalar dummy points are UTC.
+
+        # Keep source measurement timestamps unchanged. Scalar values without
+        # timestamps are explicitly marked as inferred at the requested date.
         points.sort(key=lambda row: row["time"])
         output = {
             "name": name,
             "description": spec["description"],
+            "date": date,
+            "start_date": first_day.isoformat(),
             "days": days,
             "statistics": summarize_points(points),
         }
@@ -268,7 +290,8 @@ class MCPServerProcessor(DisplayProcessor):
             elif name == "get_history":
                 keys = list(self.history_specs)
                 tool["example_args"] = (
-                    {"name": keys[0], "days": 2, "include_points": True}
+                    {"name": keys[0], "date": datetime.now().date().isoformat(),
+                     "days": 2, "include_points": True}
                     if keys else {}
                 )
             elif name == "run":
