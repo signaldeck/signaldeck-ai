@@ -4,11 +4,12 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
-from typing import Any
+from typing import Annotated, Any
 
 import uvicorn
 from jsonschema import Draft202012Validator
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from .serialization import bounded_sample, json_safe, series_points, summarize_points
 
@@ -83,7 +84,21 @@ class MCPRuntime:
                 return processor.read_values(fields)
 
         if history:
-            description = "Fetch permitted SignalDeck history and compute exact statistics.\n"
+            description = (
+                "Read historical measurements from the last N calendar days "
+                "(including today), using the configured per-day history "
+                "method or range method. By DEFAULT (include_points=false), "
+                "the tool returns AGGREGATE STATISTICS over ALL measurements "
+                "in the requested period: count, numeric_count, minimum, "
+                "maximum, mean, first_time and last_time. It does NOT return "
+                "the measurement nearest to 'now minus N days', nor a "
+                "single historical value. With include_points=true it "
+                "ADDITIONALLY returns timestamp/value samples (up to max_points); "
+                "if there are more samples than max_points, these are evenly "
+                "sampled, but statistics still use ALL measurements. "
+                "Set include_points=true for time-series/trend questions "
+                "that need actual individual measurements.\n"
+            )
             description += "\n".join(
                 f"- {item['name']}: {item['description']} (up to {item.get('max_days', 30)} days)"
                 for item in history.values()
@@ -91,10 +106,38 @@ class MCPRuntime:
 
             @mcp.tool(name="get_history", description=description)
             def get_history(
-                name: str,
-                days: int = 1,
-                include_points: bool = False,
-                max_points: int = 200,
+                name: Annotated[str, Field(
+                    description="Local name of an allowed data_rows history method."
+                )],
+                days: Annotated[int, Field(
+                    description=(
+                        "Number of calendar days to query, including today. "
+                        "For example, days=7 aggregates measurements from "
+                        "today and the preceding six calendar days; this is "
+                        "NOT a point-in-time lookup at now minus seven days."
+                    ),
+                    ge=1,
+                )] = 1,
+                include_points: Annotated[bool, Field(
+                    description=(
+                        "Default false: return only aggregate statistics "
+                        "(count, numeric_count, min/max/mean and first/last "
+                        "timestamps), calculated over ALL measurements in "
+                        "the selected days. No individual points are returned. "
+                        "True: include a 'points' array of timestamp/value "
+                        "measurements as well as the same statistics."
+                    ),
+                )] = False,
+                max_points: Annotated[int, Field(
+                    description=(
+                        "When include_points=true, maximum number of individual "
+                        "timestamp/value points returned (1 to 1000). "
+                        "Results are evenly sampled if necessary. This does "
+                        "not limit the measurements used to calculate statistics. "
+                        "Ignored when include_points=false."
+                    ),
+                    ge=1, le=1000,
+                )] = 200,
             ) -> dict[str, Any]:
                 return processor.read_history(
                     name, days=days, include_points=include_points, max_points=max_points
