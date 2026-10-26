@@ -456,3 +456,36 @@ def test_chat_script_renders_tools_as_native_collapsible_details_without_argumen
     assert 'msg.role === "tools"' in script
     assert "toolCallArgs" not in script
     assert 'case "TOOL_CALL_ARGS":' not in script
+
+
+def test_chat_loads_local_markdown_renderer_before_streaming_client():
+    from pathlib import Path
+
+    processor = make_processor()
+    assert processor.getAdditionalJsFiles("chat") == [
+        ("signaldeck_ai", "js/markdown-it.min.js"),
+        ("signaldeck_ai", "js/chat_markdown.js"),
+        ("signaldeck_ai", "js/chat.js"),
+    ]
+    script = (
+        Path(__file__).resolve().parents[1] /
+        "plugins/signaldeck_ai/static/js/chat.js"
+    ).read_text()
+    assert 'updateAssistant(node, String(evt.delta || ""), true)' in script
+    assert 'role === "assistant"' in script
+    assert 'case "TEXT_MESSAGE_END":' in script
+    assert "signaldeckAIMarkdown?.render(source)" in script
+
+
+def test_browser_markdown_supports_tables_and_escapes_untrusted_content():
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    if not shutil.which("node"):
+        pytest.skip("Node.js is needed for the optional browser Markdown test")
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        ["node", "--test", "tests/chat_markdown.test.cjs"],
+        cwd=root, check=True, capture_output=True,
+    )

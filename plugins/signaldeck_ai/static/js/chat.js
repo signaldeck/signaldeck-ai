@@ -19,6 +19,9 @@
     const form = root.querySelector(".sdai-form");
     let connectionId = null, busy = false, remoteBusy = false, interrupt = null;
     let lastMessages = null, refreshing = false;
+    const assistantMarkdown = new WeakMap();
+    const pendingMarkdown = new Set();
+    let markdownFrame = null;
     // Tool entries are display-only. They never contain arguments or results.
     const toolGroups = new Map();
     const statusText = {
@@ -29,6 +32,32 @@
     function clearTranscript() {
       transcript.replaceChildren();
       toolGroups.clear();
+      pendingMarkdown.clear();
+    }
+
+    function flushMarkdown() {
+      markdownFrame = null;
+      for (const node of pendingMarkdown) {
+        const source = assistantMarkdown.get(node) || "";
+        try {
+          const html = window.signaldeckAIMarkdown?.render(source);
+          if (typeof html === "string") node.innerHTML = html;
+          else node.textContent = source;
+        } catch (_) {
+          node.textContent = source;
+        }
+      }
+      pendingMarkdown.clear();
+      transcript.scrollTop = transcript.scrollHeight;
+    }
+
+    function updateAssistant(node, value, append = false) {
+      const previous = assistantMarkdown.get(node) || "";
+      assistantMarkdown.set(node, append ? previous + value : value);
+      pendingMarkdown.add(node);
+      if (markdownFrame === null) {
+        markdownFrame = window.requestAnimationFrame(flushMarkdown);
+      }
     }
 
     function renderToolGroup(group, live = false) {
@@ -118,7 +147,8 @@
     function render(role, value) {
       const node = document.createElement("div");
       node.className = "sdai-message sdai-" + role;
-      node.textContent = value;
+      if (role === "assistant") updateAssistant(node, String(value || ""));
+      else node.textContent = value;
       transcript.appendChild(node);
       transcript.scrollTop = transcript.scrollHeight;
       return node;
@@ -280,10 +310,12 @@
               node = render("assistant", "");
               assistantNodes.set(evt.messageId, node);
             }
-            node.textContent += String(evt.delta || "");
-            transcript.scrollTop = transcript.scrollHeight;
+            updateAssistant(node, String(evt.delta || ""), true);
             break;
           }
+          case "TEXT_MESSAGE_END":
+            flushMarkdown();
+            break;
           case "TOOL_CALL_START":
             liveToolStart(runId, evt.toolCallId, evt.toolCallName);
             break;
@@ -328,6 +360,7 @@
         if (buffer.trim()) parseFrame(buffer);
         if (!completed) render("info", "AG-UI-Stream unerwartet beendet.");
       } finally {
+        flushMarkdown();
         reader.releaseLock();
       }
     }

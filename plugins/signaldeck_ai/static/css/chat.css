@@ -6,6 +6,23 @@
 .sdai-message.sdai-user{background:#4f8bc52b;margin-left:12%}
 .sdai-message.sdai-assistant{margin-right:12%}
 .sdai-message.sdai-info{font-size:.85em;color:var(--text-muted,#777)}
+.sdai-message.sdai-assistant{white-space:normal;line-height:1.5}
+.sdai-assistant > :first-child{margin-top:0}
+.sdai-assistant > :last-child{margin-bottom:0}
+.sdai-assistant p,.sdai-assistant ul,.sdai-assistant ol,.sdai-assistant pre,.sdai-assistant table,.sdai-assistant blockquote{margin:.65em 0}
+.sdai-assistant h1,.sdai-assistant h2,.sdai-assistant h3,.sdai-assistant h4{line-height:1.25;margin:1em 0 .4em;font-weight:650}
+.sdai-assistant h1{font-size:1.4em}.sdai-assistant h2{font-size:1.25em}.sdai-assistant h3{font-size:1.1em}
+.sdai-assistant ul,.sdai-assistant ol{padding-left:1.6em}
+.sdai-assistant li + li{margin-top:.2em}
+.sdai-assistant pre{white-space:pre;overflow-x:auto;max-width:100%;padding:10px;border-radius:6px;background:#0002}
+.sdai-assistant code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}
+.sdai-assistant :not(pre) > code{padding:.1em .3em;border-radius:4px;background:#0002}
+.sdai-assistant pre code{overflow-wrap:normal}
+.sdai-assistant table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;white-space:normal}
+.sdai-assistant th,.sdai-assistant td{border:1px solid var(--border-color,#9997);padding:5px 9px;text-align:left;vertical-align:top}
+.sdai-assistant th{background:#8882;font-weight:650}
+.sdai-assistant blockquote{border-left:3px solid var(--border-color,#9998);padding-left:10px;opacity:.9}
+.sdai-assistant a{overflow-wrap:anywhere}
 .sdai-form{display:flex;gap:8px;margin-top:10px}
 .sdai-input{flex:1;min-width:80px}
 .sdai-approval{border:1px solid #b98822;padding:10px;margin-top:10px;border-radius:6px}
