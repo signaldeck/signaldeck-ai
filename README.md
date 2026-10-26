@@ -444,10 +444,12 @@ Configuration rules:
 - Cmd/script targets and their source strings never appear in the tool's
   public descriptions. The LLM cannot upload script text or submit arbitrary
   command lines.
-- `run` returns `{"name":"Abend","status":"scheduled"}` if the scheduler
-  accepted the start, or an error if validation or scheduling immediately
-  fails. It **does not claim the entire asynchronous action succeeded**.
-  Long-running execution failures require separate status inspection.
+- `run` returns `{"name":"Abend","status":"scheduled","run_id":"..."}`
+  for named scripts (no `run_id` for single Cmd commands) when scheduling
+  succeeds. Multiple instances of the same script may run concurrently.
+  The ScriptProcessor displays their separate status, variables and output,
+  and lets users stop an individual run. Scheduling does **not** imply that
+  asynchronous execution succeeded; inspect the run's status for failures.
 - The diagnostic UI marks `run` as a state-changing operation and requires
   explicit confirmation. cli-agent permission for the generic `run` tool
   covers **every** action in the server's configured run allowlist, so
