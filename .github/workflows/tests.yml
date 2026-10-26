@@ -10,6 +10,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify chat Markdown rendering and load-order recovery
+        run: node --test tests/chat_markdown.test.cjs
       - run: python -m pip install --upgrade pip
       - run: python -m pip install "git+https://github.com/signaldeck/signaldeck-sdk.git@main"
       - run: python -m pip install --no-deps "git+https://github.com/signaldeck/signaldeck-plugin-main.git@feature/dummy-history-series"
