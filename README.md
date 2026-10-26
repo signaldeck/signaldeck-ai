@@ -663,3 +663,16 @@ sichtbar, ohne den LLM-Kontext zu vergrößern. Sie werden mit
 **Verlauf zurücksetzen** gelöscht. Die Anzahl der im Speicher
 verfolgten Tool-Aufrufe pro Chat ist auf 1024 begrenzt; bei einem
 SignalDeck-Neustart geht die In-Memory-Darstellungs-Historie verloren.
+
+## Markdown in Chat-Antworten
+
+Assistant-Nachrichten werden beim Streaming und beim Wiederherstellen des
+Chatverlaufs als Markdown gerendert. Unterstützt werden insbesondere
+Überschriften, Fett-/Kursivschrift, Listen, Links, Tabellen und Codeblöcke.
+Nutzernachrichten sowie Toolnamen/-status bleiben reiner Text.
+
+Die Darstellung verwendet eine lokal ausgelieferte, fest eingebundene Kopie
+von `markdown-it` 14.1.0 (`static/js/markdown-it.min.js`, Lizenz daneben).
+HTML in Modellantworten wird escaped, gefährliche Link-Protokolle werden
+abgewiesen und externe Markdown-Bilder nicht automatisch geladen. Bei
+fehlender Renderer-Bibliothek erscheint die Antwort weiterhin als Klartext.

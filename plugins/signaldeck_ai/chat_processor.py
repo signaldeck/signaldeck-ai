@@ -72,7 +72,11 @@ class AGUIChatProcessor(DisplayProcessor):
         return ChatDisplayData(self.ctx, actionHash, self, value)
 
     def getAdditionalJsFiles(self, value):
-        return [("signaldeck_ai", "js/chat.js")]
+        return [
+            ("signaldeck_ai", "js/markdown-it.min.js"),
+            ("signaldeck_ai", "js/chat_markdown.js"),
+            ("signaldeck_ai", "js/chat.js"),
+        ]
 
     def getAdditionalCssFiles(self, value):
         return [("signaldeck_ai", "css/chat.css")]
