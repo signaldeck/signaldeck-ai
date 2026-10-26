@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 
 global.window = {
   markdownit: require('../plugins/signaldeck_ai/static/js/markdown-it.min.js'),
@@ -34,4 +37,20 @@ test('links open separately without access to the chat tab', () => {
   const html = render('[Quelle](https://example.test/)');
   assert.match(html, /target="_blank"/);
   assert.match(html, /rel="noopener noreferrer"/);
+});
+
+test('recovers when markdown-it loads after the Markdown wrapper', () => {
+  const delayedWindow = {};
+  const wrapper = fs.readFileSync(path.join(__dirname,
+    '../plugins/signaldeck_ai/static/js/chat_markdown.js'), 'utf8');
+  vm.runInNewContext(wrapper, { window: delayedWindow });
+
+  const delayedRender = delayedWindow.signaldeckAIMarkdown.render;
+  assert.equal(delayedRender('**Test**'), null);
+
+  delayedWindow.markdownit = require('../plugins/signaldeck_ai/static/js/markdown-it.min.js');
+  assert.match(delayedRender('**Test**'), /<strong>Test<\/strong>/);
+  const safe = delayedRender('<script>alert(1)</script>\n\n![Bild](https://example.test/a.png)');
+  assert.doesNotMatch(safe, /<script|<img/i);
+  assert.match(safe, /&lt;script&gt;/);
 });
