@@ -26,8 +26,11 @@ class FakeCmd:
         return Future()
 
     def runScript(self, name, **kwargs):
+        return self.startScript(name, **kwargs).future
+
+    def startScript(self, name, **kwargs):
         self.calls.append(("script", name, kwargs))
-        return Future()
+        return SimpleNamespace(run_id=f"run-{len(self.calls)}", future=Future())
 
 
 def specs():
@@ -56,7 +59,9 @@ def test_named_script_start_is_only_scheduled_and_no_dynamic_source():
     registry = RunActions(specs())
     cmd = FakeCmd()
     registry.bind(cmd)
-    assert registry.execute("Abend") == {"name": "Abend", "status": "scheduled"}
+    assert registry.execute("Abend") == {
+        "name": "Abend", "status": "scheduled", "run_id": "run-1",
+    }
     assert cmd.calls == [("script", "demo_abend", {})]
     exposed = registry.descriptions()
     assert {item["name"] for item in exposed} == {"Abend", "Pruefen"}
@@ -126,15 +131,25 @@ def test_script_alias_must_resolve_and_command_must_not_be_shadowed():
         RunActions(specs()).bind(cmd)
 
 
-def test_same_script_cannot_start_in_parallel():
+def test_scripts_require_concurrent_sdk_support():
+    cmd = FakeCmd()
+    cmd.startScript = None
+    with pytest.raises(RuntimeError, match="concurrent script runs"):
+        RunActions(specs()).bind(cmd)
+
+
+def test_same_script_can_start_in_parallel_with_distinct_run_ids():
     registry = RunActions(specs())
     cmd = FakeCmd()
     registry.bind(cmd)
-    running = Future()
-    cmd.tasks["demo_abend"] = running
-    with pytest.raises(ValueError, match="already running"):
-        registry.execute("Abend")
-    assert cmd.calls == []
+    first = registry.execute("Abend")
+    second = registry.execute("Abend")
+    assert first["run_id"] == "run-1"
+    assert second["run_id"] == "run-2"
+    assert cmd.calls == [
+        ("script", "demo_abend", {}),
+        ("script", "demo_abend", {}),
+    ]
 
 
 def test_immediately_failed_future_is_reported():
