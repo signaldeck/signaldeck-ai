@@ -39,7 +39,7 @@ The repository root `config/ai.json` defines an operational three-sensor DummyDa
 
 Use `get_values({"fields": ["temp_garten"]})`, `get_history({"name": "hist_temp_garten", "date": "2026-10-25", "days": 7, "include_points": true})` or `execute_action({"name": "set_temp_garten", "arguments": {"temp_garten": 23.5}})` from a connected MCP client. Action calls can also exercise cli-agent approvals without affecting real devices.
 
-For `get_history({\"name\": \"hist_temp_garten\", \"date\": \"2026-10-25\", \"days\": 7, \"include_points\": true})`, there are 48 actual datetime-indexed samples per completed day and the partial current day, so the MCP results have meaningful ISO-8601 timestamps (without `time_inferred`). The MCP response samples at most 200 points by default while summary statistics cover the complete time series. To retrieve up to 1,000 points use `max_points: 1000`.
+For `get_history({\"name\": \"hist_temp_garten\", \"date\": \"2026-10-25\", \"days\": 7, \"include_points\": true})`, there are 48 actual datetime-indexed samples per completed day and the partial current day, so the MCP results have meaningful ISO-8601 timestamps (without `time_inferred`). The MCP result contains **every** measurement, without sampling. With cli-agent and OS read access, the entire result is saved in a temporary session file; the LLM receives summary metadata including `workspace_path` and `records_path: "/points"` to process the data using Data MCP.
 
 While `signaldeck-plugin-main` [PR #7](https://github.com/signaldeck/signaldeck-plugin-main/pull/7) is under review, the demo Dockerfile and CI install its `feature/dummy-history-series` branch. **After that PR is merged**, switch the dependency back to the main release branch. These demo dependencies are not bundled in the AI plugin wheel.
 
@@ -315,8 +315,9 @@ The shared `PersistData.hist(date=target_day, days=0, fullDay=True)` fetches one
 individual day offset N, **not** an N-day window. For `mode=per_day`
 the new MCP processor calls the same ValueProvider method for each
 offset from 0 through N-1. Exact numeric count, min, max and mean are
-computed in Python; raw points can be optionally returned (sampled
-to at most 1000 points). Individual history mappings can restrict
+computed in Python; raw points can be optionally returned in full by the MCP
+tool, using cli-agent's metadata/file handoff to avoid a large LLM context.
+Individual history mappings can restrict
 the permitted `max_days`.
 
 Use `mode=range` for exported methods that already support
@@ -594,6 +595,23 @@ This selects October 20 and October 21. Each selected day is dispatched
 through the existing SignalDeck `hist(date=<that day>, days=0,
 fullDay=True)` API: the underlying `days` argument is an offset, hence
 **must remain zero** to avoid accidentally selecting an earlier day.
+Optional `start_time` and `end_time` (`HH:MM` or `HH:MM:SS`, local clock time)
+select the **same time window on every day** in the requested range:
+
+```json
+{"name":"hist_temp_garten","date":"2026-10-20","days":2,"start_time":"06:30","end_time":"10:30","include_points":true}
+```
+
+The start is inclusive and the end is exclusive (`06:30 <= time < 10:30`).
+Either bound may be omitted to include the rest of that calendar day.
+Overnight windows, where the start is not earlier than the end, are rejected;
+use separate calls for windows crossing midnight. Filtering occurs after
+combining stored measurements with any eligible current-day cache, but
+**before** calculating statistics or returning points. The response
+echoes both optional time bounds; aggregate counts, extrema and mean apply
+only to the filtered samples. Time filtering requires real measurement
+timestamps, not inferred midnight timestamps for scalar daily values.
+
 Request validation rejects future or invalid calendar dates and respects
 the individual `max_days` limits. Scalar historical results are marked
 `time_inferred` with the requested calendar day rather than the current
@@ -616,7 +634,7 @@ it does not promise that the measurement was recorded at exactly 14:30:00.
 The response contains `requested_time`, `value`, the configured
 description and optional unit, not a full series or daily statistics.
 
-`get_history` remains unchanged for full calendar-day time series, including
+`get_history` still supports full calendar-day time series, including
 its explicit start date, optional multi-day window, points/statistics and
 today's optional cache merge. Both tools share the same explicit
 `mcp_data.data_rows` allowlist. Custom `mode="range"` history providers
@@ -634,7 +652,7 @@ fullDay=True)`) and the in-memory measurement buffer using
 `hist(currentValues=True)`. Only actual timestamped samples for today's
 calendar date are merged; any matching timestamp is counted once, with
 the cache value taking precedence. All aggregate statistics and optional
-`points` are calculated **after** merging, before output sampling.
+`points` are calculated **after** merging, without output sampling.
 For earlier days the cache is never requested.
 
 A processor without `cacheSize` (or with an empty cache) simply returns

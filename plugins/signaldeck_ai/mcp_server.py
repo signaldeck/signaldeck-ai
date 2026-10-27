@@ -9,9 +9,65 @@ from typing import Annotated, Any
 import uvicorn
 from jsonschema import Draft202012Validator
 from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolResult, TextContent
 from pydantic import Field
 
 from .serialization import bounded_sample, json_safe, series_points, summarize_points
+
+
+_ONLY_METADATA_TO_LLM = "io.github.shuewe.cli-agent/only_metadata_to_llm"
+_METADATA_FOR_LLM = "io.github.shuewe.cli-agent/meta_data_for_llm"
+_MAX_HISTORY_RESULT_BYTES = 8_000_000
+_INLINE_HISTORY_BYTES = 8_000
+
+
+def _history_tool_result(payload: dict[str, Any]) -> CallToolResult:
+    """Let cli-agent persist complete history while exposing only useful metadata.
+
+    No path is chosen here. The agent owns artifact creation and cleanup when
+    OS read access is available; ordinary MCP clients receive the full data.
+    """
+    if "points" not in payload:
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
+            structuredContent=payload,
+        )
+
+    serialized = json.dumps(payload, ensure_ascii=False, allow_nan=False)
+    size = len(serialized.encode("utf-8"))
+    if size > _MAX_HISTORY_RESULT_BYTES:
+        raise ValueError(
+            "Complete history exceeds the MCP result size budget; "
+            "narrow the dates or the daily clock-time window."
+        )
+
+    points = payload["points"]
+    columns = ["time", "value"]
+    if any("time_inferred" in point for point in points):
+        columns.append("time_inferred")
+    metadata = {key: value for key, value in payload.items() if key != "points"}
+    metadata.update({
+        "row_count": len(points),
+        "columns": columns,
+        "records_path": "/points",
+        "time_column": "time",
+        "value_column": "value",
+        "format": "json",
+    })
+    if size <= _INLINE_HISTORY_BYTES:
+        metadata["points"] = points
+
+    return CallToolResult(
+        content=[TextContent(
+            type="text",
+            text="Complete history in structuredContent; use its /points array for analysis.",
+        )],
+        structuredContent=payload,
+        **{"_meta": {
+            _ONLY_METADATA_TO_LLM: True,
+            _METADATA_FOR_LLM: metadata,
+        }},
+    )
 
 
 class MCPRuntime:
@@ -90,6 +146,13 @@ class MCPRuntime:
                 "(YYYY-MM-DD). date is REQUIRED and is the inclusive START date. "
                 "days=1 reads that calendar day; days=N reads that day and the "
                 "following N-1 days, subject to the configured max_days. "
+                "Optional start_time and end_time (HH:MM or HH:MM:SS) select "
+                "the SAME daily clock-time window on EACH selected day. "
+                "The start is inclusive and end exclusive; omit either bound "
+                "to use the corresponding day boundary. Overnight windows "
+                "(start_time >= end_time) are not supported. "
+                "For focused investigations, narrow the daily time window "
+                "to reduce the amount of data to process. "
                 "This is NOT the offset argument of SignalDeck PersistData.hist: "
                 "the adapter selects each day with hist(date=..., days=0, "
                 "fullDay=True). If the requested window includes today, "
@@ -100,17 +163,19 @@ class MCPRuntime:
                 "returns AGGREGATE STATISTICS over ALL measurements in the "
                 "selected period: count, numeric_count, minimum, maximum, "
                 "mean, first_time and last_time. With include_points=true "
-                "it ADDITIONALLY returns timestamp/value samples (up to "
-                "max_points); if there are more samples than max_points, "
-                "they are evenly sampled, while statistics still use ALL "
-                "measurements. Set include_points=true for trend questions.\\n"
+                "it ADDITIONALLY returns ALL timestamp/value measurements "
+                "without sampling or truncation. When cli-agent supports "
+                "session files and OS read, the complete result is kept in "
+                "a workspace file; metadata includes its workspace_path "
+                "and records_path=/points. Use Data MCP on that file "
+                "for detailed comparisons or calculations.\\n"
             )
             description += "\\n".join(
                 f"- {item['name']}: {item['description']} (up to {item.get('max_days', 30)} days)"
                 for item in history.values()
             )
 
-            @mcp.tool(name="get_history", description=description)
+            @mcp.tool(name="get_history", description=description, structured_output=False)
             def get_history(
                 name: Annotated[str, Field(
                     description="Local name of an allowed data_rows history method."
@@ -131,31 +196,42 @@ class MCPRuntime:
                     ),
                     ge=1,
                 )] = 1,
+                start_time: Annotated[str | None, Field(
+                    description=(
+                        "Optional inclusive local clock-time lower bound, "
+                        "HH:MM or HH:MM:SS. Applied separately on EACH "
+                        "selected calendar day, not just the first. "
+                        "Omit to start at midnight. Must be earlier than end_time."
+                    ),
+                    pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$",
+                )] = None,
+                end_time: Annotated[str | None, Field(
+                    description=(
+                        "Optional exclusive local clock-time upper bound, "
+                        "HH:MM or HH:MM:SS. Applied separately on EACH "
+                        "selected calendar day. Omit to include the full "
+                        "remainder of the day. Overnight windows are invalid."
+                    ),
+                    pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$",
+                )] = None,
                 include_points: Annotated[bool, Field(
                     description=(
                         "Default false: return only aggregate statistics "
                         "(count, numeric_count, min/max/mean and first/last "
                         "timestamps), calculated over ALL measurements in "
                         "the selected days. No individual points are returned. "
-                        "True: include a 'points' array of timestamp/value "
-                        "measurements as well as the same statistics."
+                        "True: include every timestamp/value measurement, "
+                        "with no sampling. cli-agent can store the full "
+                        "result as a file for Data MCP operations."
                     ),
                 )] = False,
-                max_points: Annotated[int, Field(
-                    description=(
-                        "When include_points=true, maximum number of individual "
-                        "timestamp/value points returned (1 to 1000). "
-                        "Results are evenly sampled if necessary. This does "
-                        "not limit the measurements used to calculate statistics. "
-                        "Ignored when include_points=false."
-                    ),
-                    ge=1, le=1000,
-                )] = 200,
-            ) -> dict[str, Any]:
-                return processor.read_history(
+            ) -> CallToolResult:
+                history_result = processor.read_history(
                     name, date=date, days=days,
-                    include_points=include_points, max_points=max_points,
+                    start_time=start_time, end_time=end_time,
+                    include_points=include_points, max_points=None,
                 )
+                return _history_tool_result(history_result)
 
 
             @mcp.tool(
@@ -267,6 +343,10 @@ class MCPRuntime:
             return value
 
         converted = convert(result)
+        if isinstance(converted, dict) and isinstance(converted.get("structuredContent"), dict):
+            # Opt-in tools return a CallToolResult directly, which also
+            # contains _meta and a short descriptive text content block.
+            return converted["structuredContent"]
         # FastMCP's in-process call returns (text content blocks, structured
         # output). The diagnostic UI should show the structured output once,
         # not both serialized and structured copies of the same measurements.
