@@ -160,6 +160,35 @@ def test_history_mcp_returns_all_records_with_compact_metadata(monkeypatch, cons
     assert meta["statistics"]["mean"] == 602.0
 
 
+def test_history_diagnostic_accepts_more_than_10000_complete_points(monkeypatch, console_processor):
+    from datetime import datetime, timedelta
+
+    processor, _ = console_processor
+    start = datetime(2026, 10, 24)
+    measurements = {
+        (start + timedelta(seconds=index)).isoformat(): float(index)
+        for index in range(10001)
+    }
+
+    def history(name, *args, **kwargs):
+        return measurements
+
+    monkeypatch.setattr(processor.valueProvider, "getMethodValue", history)
+    result = invoke(
+        processor, tool_name="get_history",
+        arguments=json.dumps({
+            "name": "hist_temp_garten", "date": "2026-10-24", "include_points": True,
+        }),
+    )
+    assert result["ok"], result.get("error")
+    payload = result["result"]
+    assert payload["statistics"]["count"] == 10001
+    assert payload["total_points"] == 10001
+    assert payload["sampled"] is False
+    assert len(payload["points"]) == 10001
+    assert payload["points"][-1]["value"] == 10000.0
+
+
 def test_mutating_tool_requires_explicit_confirmation(console_processor):
     processor, dummy = console_processor
     params = {

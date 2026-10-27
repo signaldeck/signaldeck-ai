@@ -443,6 +443,11 @@ class MCPServerProcessor(DisplayProcessor):
             if kwargs.get("confirm_write") != "true":
                 raise ValueError("Schreibaktion muss ausdrücklich bestätigt werden.")
         result = self.runtime.call_registered_tool(tool_name, arguments)
+        if tool_name == "get_history":
+            # FastMCP already returns the JSON-compatible structured result.
+            # History is separately size-limited by the MCP adapter, whereas
+            # json_safe would reject valid results with over 10,000 points.
+            return {"tool": tool_name, "result": result}
         return {"tool": tool_name, "result": json_safe(result)}
 
     def getAdditionalJsFiles(self, value):
