@@ -50,7 +50,12 @@ def test_catalog_is_actual_registered_mcp_tool_schema(console_processor):
     props = tools["get_history"]["input_schema"]["properties"]
     assert "aggregate statistics" in props["include_points"]["description"]
     assert "No individual points" in props["include_points"]["description"]
-    assert "evenly sampled" in props["max_points"]["description"]
+    assert "max_points" not in props
+    assert "every timestamp/value measurement" in props["include_points"]["description"]
+    assert "start_time" in props and "end_time" in props
+    assert "start_time" not in tools["get_history"]["input_schema"]["required"]
+    assert "end_time" not in tools["get_history"]["input_schema"]["required"]
+    assert "EACH" in props["start_time"]["description"]
 
     assert tools["execute_action"]["is_action"] is True
     assert "Aktuelle" in tools["get_values"]["description"] or "simulierte" in tools["get_values"]["description"]
@@ -79,6 +84,109 @@ def test_history_tool_executes_with_fastmcp(console_processor):
     )
     assert result["ok"], result
     assert "hist_temp_garten" in json.dumps(result["result"])
+
+
+def test_history_tool_accepts_daily_time_window_through_fastmcp(console_processor):
+    processor, _ = console_processor
+    result = invoke(
+        processor, tool_name="get_history",
+        arguments=json.dumps({
+            "name": "hist_temp_garten", "date": "2026-10-24", "days": 2,
+            "start_time": "07:00", "end_time": "08:00", "include_points": True,
+        }),
+    )
+    assert result["ok"], result
+    payload = result["result"]
+    assert payload["start_time"] == "07:00"
+    assert payload["end_time"] == "08:00"
+    assert payload["statistics"]["count"] == 4
+    assert all("07:00" <= point["time"][11:16] < "08:00"
+               for point in payload["points"])
+
+
+def test_history_mcp_metadata_handoff_and_statistics_only(console_processor):
+    import asyncio
+
+    processor, _ = console_processor
+    args = {"name": "hist_temp_garten", "date": "2026-10-24", "include_points": True}
+    result = asyncio.run(processor.runtime.mcp.call_tool("get_history", args))
+    assert result.structuredContent["name"] == args["name"]
+    assert result.structuredContent["sampled"] is False
+    assert result.meta["io.github.shuewe.cli-agent/only_metadata_to_llm"] is True
+    metadata = result.meta["io.github.shuewe.cli-agent/meta_data_for_llm"]
+    assert metadata["records_path"] == "/points"
+    assert metadata["columns"][:2] == ["time", "value"]
+    assert metadata["time_column"] == "time"
+    assert metadata["value_column"] == "value"
+    assert metadata["row_count"] == len(result.structuredContent["points"])
+    assert metadata["points"] == result.structuredContent["points"]
+    assert "workspace_path" not in metadata  # cli-agent adds the session path
+
+    only_stats = asyncio.run(processor.runtime.mcp.call_tool(
+        "get_history", {**args, "include_points": False},
+    ))
+    assert "points" not in only_stats.structuredContent
+    assert not only_stats.meta or not only_stats.meta.get(
+        "io.github.shuewe.cli-agent/only_metadata_to_llm",
+    )
+
+
+def test_history_mcp_returns_all_records_with_compact_metadata(monkeypatch, console_processor):
+    import asyncio
+    from datetime import datetime, timedelta
+
+    processor, _ = console_processor
+    start = datetime(2026, 10, 24, 0, 0)
+    measurements = {
+        (start + timedelta(minutes=index)).isoformat(): float(index)
+        for index in range(1205)
+    }
+
+    def history(name, *args, **kwargs):
+        if kwargs.get("currentValues"):
+            return None
+        return measurements
+
+    monkeypatch.setattr(processor.valueProvider, "getMethodValue", history)
+    result = asyncio.run(processor.runtime.mcp.call_tool("get_history", {
+        "name": "hist_temp_garten", "date": "2026-10-24", "include_points": True,
+    }))
+    assert result.structuredContent["total_points"] == 1205
+    assert result.structuredContent["sampled"] is False
+    assert len(result.structuredContent["points"]) == 1205
+    meta = result.meta["io.github.shuewe.cli-agent/meta_data_for_llm"]
+    assert meta["row_count"] == 1205
+    assert "points" not in meta
+    assert meta["statistics"]["mean"] == 602.0
+
+
+def test_history_diagnostic_accepts_more_than_10000_complete_points(monkeypatch, console_processor):
+    from datetime import datetime, timedelta
+
+    processor, _ = console_processor
+    start = datetime(2026, 10, 24)
+    measurements = {
+        (start + timedelta(seconds=index)).isoformat(): float(index)
+        for index in range(10001)
+    }
+
+    def history(name, *args, **kwargs):
+        return measurements
+
+    monkeypatch.setattr(processor.valueProvider, "getMethodValue", history)
+    result = invoke(
+        processor, tool_name="get_history",
+        arguments=json.dumps({
+            "name": "hist_temp_garten", "date": "2026-10-24", "include_points": True,
+        }),
+    )
+    assert result["ok"], result.get("error")
+    payload = result["result"]
+    assert payload["statistics"]["count"] == 10001
+    assert payload["total_points"] == 10001
+    assert payload["sampled"] is False
+    assert len(payload["points"]) == 10001
+    assert payload["points"][-1]["value"] == 10000.0
 
 
 def test_mutating_tool_requires_explicit_confirmation(console_processor):

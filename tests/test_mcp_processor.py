@@ -238,6 +238,117 @@ def test_get_history_queries_leap_day_as_second_day():
     assert all(call[2]["days"] == 0 for call in provider.calls)
 
 
+def test_history_clock_window_filters_each_day_before_statistics_and_sampling():
+    processor, provider = make_processor()
+
+    def timestamped_history(name, *args, **kwargs):
+        if kwargs.get("currentValues"):
+            return None
+        day = kwargs["date"].date().isoformat()
+        return {
+            f"{day}T06:29:59": 1000.0,
+            f"{day}T06:30:00": 10.0,
+            f"{day}T07:30:00": 20.0,
+            f"{day}T10:29:59": 30.0,
+            f"{day}T10:30:00": 1000.0,
+        }
+
+    provider.getMethodValue = timestamped_history
+    result = processor.read_history(
+        "keller_hist", date="2026-10-24", days=2,
+        start_time="06:30", end_time="10:30",
+        include_points=True, max_points=2,
+    )
+    assert result["start_time"] == "06:30"
+    assert result["end_time"] == "10:30"
+    assert result["statistics"] == {
+        "count": 6, "numeric_count": 6, "minimum": 10.0,
+        "maximum": 30.0, "mean": 20.0,
+        "first_time": "2026-10-24T06:30:00",
+        "last_time": "2026-10-25T10:29:59",
+    }
+    assert result["sampled"] is True
+    assert result["total_points"] == 6
+    assert [p["time"] for p in result["points"]] == [
+        "2026-10-24T06:30:00", "2026-10-25T10:29:59",
+    ]
+
+
+def test_history_clock_filter_accepts_one_bound_and_second_precision():
+    processor, provider = make_processor()
+
+    def timestamped_history(name, *args, **kwargs):
+        return {
+            "2026-10-24T07:29:59": 1.0,
+            "2026-10-24T07:30:00": 2.0,
+            "2026-10-24T07:30:01": 3.0,
+        }
+
+    provider.getMethodValue = timestamped_history
+    for kwargs, expected in [
+        ({"start_time": "07:30"}, [2.0, 3.0]),
+        ({"end_time": "07:30"}, [1.0]),
+        ({"start_time": "07:30:01", "end_time": "07:30:02"}, [3.0]),
+        ({"start_time": "08:00", "end_time": "09:00"}, []),
+        ({}, [1.0, 2.0, 3.0]),
+    ]:
+        result = processor.read_history(
+            "keller_hist", date="2026-10-24", include_points=True, **kwargs,
+        )
+        assert [p["value"] for p in result["points"]] == expected
+        assert result["statistics"]["count"] == len(expected)
+        assert result["start_time"] == kwargs.get("start_time")
+        assert result["end_time"] == kwargs.get("end_time")
+
+
+@pytest.mark.parametrize("start_time,end_time", [
+    ("12:00", "12:00"), ("22:00", "02:00"),
+    ("24:00", None), (None, "00:00"),
+    ("07:60", None), ("7:30", None), ("07:30:60", None),
+    ("07:30Z", None), ("", None), (0, None),
+    (None, ["10:00"]),
+])
+def test_history_clock_filter_rejects_invalid_windows_before_read(start_time, end_time):
+    processor, provider = make_processor()
+    with pytest.raises(ValueError):
+        processor.read_history(
+            "keller_hist", date="2026-10-24",
+            start_time=start_time, end_time=end_time,
+        )
+    assert provider.calls == []
+
+
+def test_history_clock_filter_rejects_inferred_midnight():
+    processor, _ = make_processor()
+    with pytest.raises(ValueError, match="actual measurement timestamps"):
+        processor.read_history(
+            "keller_hist", date="2026-10-24", start_time="06:30",
+        )
+
+
+def test_history_clock_filter_applies_to_custom_range_provider():
+    processor, provider = make_processor()
+    processor.history_specs["keller_hist"]["mode"] = "range"
+
+    def range_history(name, *args, **kwargs):
+        provider.calls.append(("getMethodValue", name, kwargs))
+        return {
+            "2026-10-24T07:00:00": 1.0,
+            "2026-10-24T08:00:00": 2.0,
+            "2026-10-25T07:00:00": 3.0,
+            "2026-10-25T08:00:00": 4.0,
+        }
+
+    provider.getMethodValue = range_history
+    result = processor.read_history(
+        "keller_hist", date="2026-10-24", days=2,
+        start_time="07:00", end_time="08:00", include_points=True,
+    )
+    assert [p["value"] for p in result["points"]] == [1.0, 3.0]
+    assert result["statistics"]["mean"] == 2.0
+    assert provider.calls[0][2]["days"] == 2
+
+
 def test_get_history_rejects_future_end_of_window_without_provider_reads():
     processor, provider = make_processor()
     from datetime import datetime
@@ -286,6 +397,33 @@ def test_today_merges_cached_samples_and_prefers_cache_on_exact_timestamp():
     assert result["total_points"] == 4
     assert len([p for p in result["points"] if p["time"] == persisted_time]) == 1
     assert all(p["value"] != 900.0 for p in result["points"])
+
+
+def test_history_clock_filter_uses_merged_current_day_cache_before_statistics():
+    processor, provider = make_processor()
+    today = datetime.now().date().isoformat()
+
+    def history(name, *args, **kwargs):
+        if kwargs.get("currentValues"):
+            return {
+                f"{today}T10:30:00": 50.0,
+                f"{today}T10:45:00": 60.0,
+                f"{today}T11:00:00": 70.0,
+            }
+        return {
+            f"{today}T10:29:59": 100.0,
+            f"{today}T10:30:00": 20.0,
+            f"{today}T11:00:00": 30.0,
+        }
+
+    provider.getMethodValue = history
+    result = processor.read_history(
+        "keller_hist", date=today,
+        start_time="10:30", end_time="11:00", include_points=True,
+    )
+    assert [p["value"] for p in result["points"]] == [50.0, 60.0]
+    assert result["statistics"]["count"] == 2
+    assert result["statistics"]["mean"] == 55.0
 
 
 def test_cache_is_not_queried_for_historical_day_or_range_provider():

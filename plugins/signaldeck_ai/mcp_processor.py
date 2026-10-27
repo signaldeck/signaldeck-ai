@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date as calendar_date, datetime, time, timedelta
 from flask import request
 from jsonschema import ValidationError
@@ -14,6 +15,17 @@ from signaldeck_sdk import DisplayProcessor, DisplayData
 from .mcp_server import MCPRuntime
 from .run_actions import RunActions
 from .serialization import bounded_sample, json_safe, merge_history_points, series_points, summarize_points
+
+
+_CLOCK_TIME_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\Z")
+
+
+def _parse_history_clock(value: str | None, parameter: str) -> time | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or _CLOCK_TIME_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"{parameter} must be a local time in HH:MM or HH:MM:SS format")
+    return time.fromisoformat(value)
 
 
 class MCPDisplayData(DisplayData):
@@ -189,7 +201,8 @@ class MCPServerProcessor(DisplayProcessor):
 
     def read_history(
         self, name: str, *, date: str, days: int = 1,
-        include_points: bool = False, max_points: int = 200,
+        start_time: str | None = None, end_time: str | None = None,
+        include_points: bool = False, max_points: int | None = 200,
     ) -> dict[str, Any]:
         """Read a date-anchored span, starting on the requested calendar day.
 
@@ -210,8 +223,12 @@ class MCPServerProcessor(DisplayProcessor):
             raise ValueError("date must be a calendar date in YYYY-MM-DD format")
         if type(days) is not int or not 1 <= days <= spec.get("max_days", 30):
             raise ValueError("Requested history range is not permitted")
-        if type(max_points) is not int or not 1 <= max_points <= 1000:
+        if max_points is not None and (type(max_points) is not int or not 1 <= max_points <= 1000):
             raise ValueError("max_points must be between 1 and 1000")
+        start_clock = _parse_history_clock(start_time, "start_time")
+        end_clock = _parse_history_clock(end_time, "end_time")
+        if (start_clock or time.min) >= (end_clock or time.max):
+            raise ValueError("start_time must be earlier than end_time within each day")
         try:
             end_day = target_day + timedelta(days=days - 1)
         except OverflowError as exc:
@@ -274,6 +291,18 @@ class MCPServerProcessor(DisplayProcessor):
         # Keep source measurement timestamps unchanged. Scalar values without
         # timestamps are explicitly marked as inferred at the requested date.
         points.sort(key=lambda row: row["time"])
+        if start_clock is not None or end_clock is not None:
+            if any(point.get("time_inferred") for point in points):
+                raise ValueError("Time-of-day filtering requires actual measurement timestamps")
+            filtered = []
+            for point in points:
+                stamp = datetime.fromisoformat(point["time"])
+                clock = stamp.time().replace(tzinfo=None)
+                if (target_day <= stamp.date() <= end_day
+                        and (start_clock is None or clock >= start_clock)
+                        and (end_clock is None or clock < end_clock)):
+                    filtered.append(point)
+            points = filtered
         output = {
             "name": name,
             "description": spec["description"],
@@ -281,13 +310,17 @@ class MCPServerProcessor(DisplayProcessor):
             "start_date": date,
             "end_date": end_day.isoformat(),
             "days": days,
+            "start_time": start_time,
+            "end_time": end_time,
             "statistics": summarize_points(points),
         }
         if "unit" in spec:
             output["unit"] = spec["unit"]
         if include_points:
-            output["points"] = bounded_sample(points, max_points)
-            output["sampled"] = len(points) > max_points
+            # Only the MCP adapter requests max_points=None. It must publish
+            # all measurements so workspace-based analysis is deterministic.
+            output["points"] = points if max_points is None else bounded_sample(points, max_points)
+            output["sampled"] = max_points is not None and len(points) > max_points
             output["total_points"] = len(points)
         return output
 
@@ -410,6 +443,11 @@ class MCPServerProcessor(DisplayProcessor):
             if kwargs.get("confirm_write") != "true":
                 raise ValueError("Schreibaktion muss ausdrücklich bestätigt werden.")
         result = self.runtime.call_registered_tool(tool_name, arguments)
+        if tool_name == "get_history":
+            # FastMCP already returns the JSON-compatible structured result.
+            # History is separately size-limited by the MCP adapter, whereas
+            # json_safe would reject valid results with over 10,000 points.
+            return {"tool": tool_name, "result": result}
         return {"tool": tool_name, "result": json_safe(result)}
 
     def getAdditionalJsFiles(self, value):
