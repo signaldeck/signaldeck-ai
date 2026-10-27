@@ -211,6 +211,11 @@ class RunActions:
 
     def bind(self, cmd: Any) -> None:
         """Called by SignalDeck after Cmd and configured scripts are loaded."""
+        if any("script" in spec for spec in self.specs.values()):
+            if not callable(getattr(cmd, "startScript", None)):
+                raise RuntimeError(
+                    "Named script runs require signaldeck-sdk with concurrent script runs"
+                )
         for name, spec in self.specs.items():
             if "command" in spec:
                 target = spec["command"]
@@ -274,22 +279,26 @@ class RunActions:
             future = self.cmd.run(
                 [" ".join(tokens)], name="mcp-run-" + uuid.uuid4().hex
             )
+            run_id = None
         else:
             script_name = spec["script"]
             if self.cmd.getScript(script_name) is None:
                 raise ValueError("Configured Cmd script is no longer available")
-            # Cmd stores task/current/stop state by script name; avoid
-            # overlapping runs overwriting these references.
-            previous = self.cmd.tasks.get(script_name)
-            if previous is not None and not previous.done():
-                raise ValueError("The selected script is already running")
             variables = {
                 key: resolve(value)
                 for key, value in spec.get("variables", {}).items()
             }
-            future = self.cmd.runScript(script_name, **variables)
+            # Independent script instances are identified and stoppable in the
+            # ScriptProcessor. The SDK preserves runScript's Future API for
+            # older callers, while startScript also returns the run identity.
+            run = self.cmd.startScript(script_name, **variables)
+            future = run.future
+            run_id = run.run_id
 
         if future is not None and future.done():
             # Report immediate scheduler/parser failure if already available.
             future.result()
-        return {"name": name, "status": "scheduled"}
+        result = {"name": name, "status": "scheduled"}
+        if run_id is not None:
+            result["run_id"] = run_id
+        return result
