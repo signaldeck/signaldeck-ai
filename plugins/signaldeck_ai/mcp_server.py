@@ -18,7 +18,7 @@ from .serialization import bounded_sample, json_safe, series_points, summarize_p
 _ONLY_METADATA_TO_LLM = "io.github.shuewe.cli-agent/only_metadata_to_llm"
 _METADATA_FOR_LLM = "io.github.shuewe.cli-agent/meta_data_for_llm"
 _MAX_HISTORY_RESULT_BYTES = 8_000_000
-_INLINE_HISTORY_BYTES = 8_000
+_INLINE_HISTORY_BYTES = 5_000
 
 
 def _history_tool_result(payload: dict[str, Any]) -> CallToolResult:
