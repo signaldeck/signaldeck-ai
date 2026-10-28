@@ -142,26 +142,17 @@ class MCPRuntime:
 
         if history:
             description = (
-                "Read historical measurements for an explicit calendar date "
-                "(YYYY-MM-DD). date is REQUIRED and is the inclusive START date. "
-                "days=1 reads that calendar day; days=N reads that day and the "
-                "following N-1 days, subject to the configured max_days. "
-                "Optional start_time and end_time (HH:MM or HH:MM:SS) select "
-                "the SAME daily clock-time window on EACH selected day. "
-                "The start is inclusive and end exclusive; omit either bound "
-                "to use the corresponding day boundary. Overnight windows "
-                "(start_time >= end_time) are not supported. "
-                "For focused investigations, narrow the daily time window "
-                "to reduce the amount of data to process. "
-                "This is NOT the offset argument of SignalDeck PersistData.hist: "
-                "the adapter selects each day with hist(date=..., days=0, "
-                "fullDay=True). If the requested window includes today, "
-                "timestamped samples from hist(currentValues=True) are "
-                "merged with persisted measurements (cache wins on duplicate "
-                "timestamps); earlier days use persisted data only. "
+                "Read historical measurements between REQUIRED absolute ISO 8601 "
+                "timestamps start (inclusive) and end (exclusive). Both MUST "
+                "include Z or an explicit UTC offset; never send naive local "
+                "dates or times. UTC and offset-formatted bounds addressing "
+                "the same instants return the same data, regardless of the "
+                "SignalDeck datastore timezone. A history's max_days limits "
+                "elapsed time. Source measurement offsets are preserved. "
+                "Recent cached measurements are merged where available. "
                 "By DEFAULT (include_points=false), the tool "
                 "returns AGGREGATE STATISTICS over ALL measurements in the "
-                "selected period: count, numeric_count, minimum, maximum, "
+                "selected interval: count, numeric_count, minimum, maximum, "
                 "mean, first_time and last_time. With include_points=true "
                 "it ADDITIONALLY returns ALL timestamp/value measurements "
                 "without sampling or truncation. When cli-agent supports "
@@ -180,46 +171,26 @@ class MCPRuntime:
                 name: Annotated[str, Field(
                     description="Local name of an allowed data_rows history method."
                 )],
-                date: Annotated[str, Field(
+                start: Annotated[str, Field(
                     description=(
-                        "Required calendar date YYYY-MM-DD, inclusive START "
-                        "date of the selected history window. For example "
-                        "2026-10-20 with days=2 selects October 20 and 21."
+                        "Required inclusive instant with offset, e.g. "
+                        "2026-10-28T19:35:00Z or 2026-10-28T20:35:00+01:00."
                     ),
-                    pattern=r"^\d{4}-\d{2}-\d{2}$",
+                    pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$",
                 )],
-                days: Annotated[int, Field(
+                end: Annotated[str, Field(
                     description=(
-                        "Number of calendar days starting on the selected "
-                        "date, including the date itself (default 1). "
-                        "NOT a relative offset from today."
+                        "Required exclusive instant with offset; must be after "
+                        "start and within this history's max_days duration."
                     ),
-                    ge=1,
-                )] = 1,
-                start_time: Annotated[str | None, Field(
-                    description=(
-                        "Optional inclusive local clock-time lower bound, "
-                        "HH:MM or HH:MM:SS. Applied separately on EACH "
-                        "selected calendar day, not just the first. "
-                        "Omit to start at midnight. Must be earlier than end_time."
-                    ),
-                    pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$",
-                )] = None,
-                end_time: Annotated[str | None, Field(
-                    description=(
-                        "Optional exclusive local clock-time upper bound, "
-                        "HH:MM or HH:MM:SS. Applied separately on EACH "
-                        "selected calendar day. Omit to include the full "
-                        "remainder of the day. Overnight windows are invalid."
-                    ),
-                    pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$",
-                )] = None,
+                    pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$",
+                )],
                 include_points: Annotated[bool, Field(
                     description=(
                         "Default false: return only aggregate statistics "
                         "(count, numeric_count, min/max/mean and first/last "
                         "timestamps), calculated over ALL measurements in "
-                        "the selected days. No individual points are returned. "
+                        "the selected interval. No individual points are returned. "
                         "True: include every timestamp/value measurement, "
                         "with no sampling. cli-agent can store the full "
                         "result as a file for Data MCP operations."
@@ -227,8 +198,7 @@ class MCPRuntime:
                 )] = False,
             ) -> CallToolResult:
                 history_result = processor.read_history(
-                    name, date=date, days=days,
-                    start_time=start_time, end_time=end_time,
+                    name, start=start, end=end,
                     include_points=include_points, max_points=None,
                 )
                 return _history_tool_result(history_result)
@@ -237,9 +207,9 @@ class MCPRuntime:
             @mcp.tool(
                 name="get_historical_value",
                 description=(
-                    "Retrieve ONE historical value for a precise, REQUIRED local "
-                    "date and time (YYYY-MM-DDTHH:MM:SS). An ISO date without "
-                    "a time is invalid. Calls SignalDeck hist(date=..., "
+                    "Retrieve ONE historical value at a REQUIRED absolute ISO "
+                    "8601 instant with Z or an explicit UTC offset. Naive local "
+                    "times and date-only values are invalid. Calls hist(date=..., "
                     "days=0, fullDay=False), selecting the datastore's best "
                     "matching value; this is not necessarily a measurement "
                     "recorded at exactly the requested second. For whole-day "
@@ -258,11 +228,10 @@ class MCPRuntime:
                 )],
                 date: Annotated[str, Field(
                     description=(
-                        "REQUIRED exact local date AND time formatted "
-                        "YYYY-MM-DDTHH:MM:SS; date-only values are rejected. "
-                        "Example: 2026-10-20T14:30:00."
+                        "Required timestamp including Z or an explicit offset; "
+                        "e.g. 2026-10-28T19:50:30Z or 2026-10-28T20:50:30+01:00."
                     ),
-                    pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$",
+                    pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$",
                 )],
             ) -> dict[str, Any]:
                 return processor.read_historical_value(name, date=date)
