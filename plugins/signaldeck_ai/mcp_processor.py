@@ -276,6 +276,11 @@ class MCPServerProcessor(DisplayProcessor):
                     cache_points = series_points(
                         cached, day=0, allow_scalar=False,
                     )
+                    # The optional cache must never invalidate otherwise
+                    # usable persisted history. Validate every cached instant
+                    # here, even if that sample is outside the requested range.
+                    for point in cache_points:
+                        _point_instant(point)
                 except (ValueError, TypeError, KeyError, AttributeError) as exc:
                     # Optional cache support must not break a valid persistent
                     # history read (e.g. DummyData returns a scalar).

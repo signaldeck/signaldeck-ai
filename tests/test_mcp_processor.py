@@ -428,6 +428,30 @@ def test_unavailable_or_scalar_cache_does_not_change_persisted_history():
     assert result["points"][0]["value"] == 20.0
 
 
+@pytest.mark.parametrize("cache_timestamp", ["naive_inside", "naive_outside", "date_only"])
+def test_incompatible_timestamped_cache_does_not_break_persisted_history(cache_timestamp):
+    processor, provider = make_processor()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    ambiguous = {
+        "naive_inside": now.replace(tzinfo=None).isoformat(),
+        "naive_outside": (now - timedelta(days=4)).replace(tzinfo=None).isoformat(),
+        "date_only": (now - timedelta(days=4)).date().isoformat(),
+    }[cache_timestamp]
+
+    def history(name, **kwargs):
+        if kwargs.get("currentValues"):
+            return {ambiguous: 999.0}
+        return {now.isoformat(): 20.0}
+
+    provider.getMethodValue = history
+    result = processor.read_history(
+        "keller_hist", start=(now - timedelta(minutes=1)).isoformat(),
+        end=(now + timedelta(minutes=1)).isoformat(), include_points=True,
+    )
+    assert result["statistics"]["count"] == 1
+    assert result["points"] == [{"time": now.isoformat(), "value": 20.0}]
+
+
 def test_point_lookup_passes_equivalent_aware_instants_to_provider():
     processor, provider = make_processor()
     original = provider.getMethodValue
