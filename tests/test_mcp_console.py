@@ -1,5 +1,6 @@
 """Diagnostic MCP console uses the exact FastMCP registry and SignalDeck actions."""
 import json
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +22,23 @@ def console_processor():
     provider = ValueProvider()
     dummy = Data("dummy_temperature", configs["dummy_temperature"],
                  SimpleNamespace(), provider, False)
+    # DummyData deliberately emits timezone-naive synthetic wall times. For
+    # MCP protocol tests, adapt only this fixture to a timezone-aware UTC
+    # source, as real persisted SignalDeck measurements already are.
+    original_get_method = provider.getMethodValue
+
+    def aware_demo_method(name, *args, **kwargs):
+        if name.startswith("hist_temperature_"):
+            date = kwargs.get("date")
+            if date is not None:
+                kwargs = {**kwargs, "date": date.replace(tzinfo=None)}
+            result = original_get_method(name, *args, **kwargs)
+            if hasattr(result, "index") and hasattr(result.index, "tz_localize"):
+                result.index = result.index.tz_localize("UTC")
+            return result
+        return original_get_method(name, *args, **kwargs)
+
+    provider.getMethodValue = aware_demo_method
     processor = MCPServerProcessor("mcp_climate", configs["mcp_climate"],
                                     SimpleNamespace(), provider, False)
     processor.runtime = MCPRuntime(processor)
@@ -44,18 +62,17 @@ def test_catalog_is_actual_registered_mcp_tool_schema(console_processor):
     history_description = tools["get_history"]["description"]
     assert "AGGREGATE STATISTICS" in history_description
     assert "ALL measurements" in history_description
-    assert "inclusive START date" in history_description
-    assert "date" in tools["get_history"]["input_schema"]["required"]
+    assert "absolute ISO 8601" in history_description
+    assert set(tools["get_history"]["input_schema"]["required"]) == {"name", "start", "end"}
     assert set(tools["get_historical_value"]["input_schema"]["required"]) == {"name", "date"}
     props = tools["get_history"]["input_schema"]["properties"]
     assert "aggregate statistics" in props["include_points"]["description"]
     assert "No individual points" in props["include_points"]["description"]
     assert "max_points" not in props
     assert "every timestamp/value measurement" in props["include_points"]["description"]
-    assert "start_time" in props and "end_time" in props
-    assert "start_time" not in tools["get_history"]["input_schema"]["required"]
-    assert "end_time" not in tools["get_history"]["input_schema"]["required"]
-    assert "EACH" in props["start_time"]["description"]
+    assert "start" in props and "end" in props
+    assert not {"date", "days", "start_time", "end_time"} & props.keys()
+    assert "UTC offset" in props["start"]["description"] or "offset" in props["start"]["description"]
 
     assert tools["execute_action"]["is_action"] is True
     assert "Aktuelle" in tools["get_values"]["description"] or "simulierte" in tools["get_values"]["description"]
@@ -79,28 +96,30 @@ def test_history_tool_executes_with_fastmcp(console_processor):
     result = invoke(
         processor, tool_name="get_history",
         arguments=json.dumps({
-            "name": "hist_temp_garten", "date": "2026-10-24", "days": 2, "include_points": True
+            "name": "hist_temp_garten", "start": "2026-10-24T00:00:00Z",
+            "end": "2026-10-26T00:00:00Z", "include_points": True
         }),
     )
     assert result["ok"], result
     assert "hist_temp_garten" in json.dumps(result["result"])
 
 
-def test_history_tool_accepts_daily_time_window_through_fastmcp(console_processor):
+def test_history_tool_accepts_absolute_window_through_fastmcp(console_processor):
     processor, _ = console_processor
     result = invoke(
         processor, tool_name="get_history",
         arguments=json.dumps({
-            "name": "hist_temp_garten", "date": "2026-10-24", "days": 2,
-            "start_time": "07:00", "end_time": "08:00", "include_points": True,
+            "name": "hist_temp_garten", "start": "2026-10-24T07:00:00Z",
+            "end": "2026-10-25T08:00:00Z", "include_points": True,
         }),
     )
     assert result["ok"], result
     payload = result["result"]
-    assert payload["start_time"] == "07:00"
-    assert payload["end_time"] == "08:00"
-    assert payload["statistics"]["count"] == 4
-    assert all("07:00" <= point["time"][11:16] < "08:00"
+    assert payload["start"] == "2026-10-24T07:00:00Z"
+    assert payload["end"] == "2026-10-25T08:00:00Z"
+    start = datetime.fromisoformat(payload["start"].replace("Z", "+00:00"))
+    end = datetime.fromisoformat(payload["end"].replace("Z", "+00:00"))
+    assert all(start <= datetime.fromisoformat(point["time"].replace("Z", "+00:00")) < end
                for point in payload["points"])
 
 
@@ -108,7 +127,8 @@ def test_history_mcp_metadata_handoff_and_statistics_only(console_processor):
     import asyncio
 
     processor, _ = console_processor
-    args = {"name": "hist_temp_garten", "date": "2026-10-24", "include_points": True}
+    args = {"name": "hist_temp_garten", "start": "2026-10-24T00:00:00Z",
+            "end": "2026-10-25T00:00:00Z", "include_points": True}
     result = asyncio.run(processor.runtime.mcp.call_tool("get_history", args))
     assert result.structuredContent["name"] == args["name"]
     assert result.structuredContent["sampled"] is False
@@ -133,10 +153,10 @@ def test_history_mcp_metadata_handoff_and_statistics_only(console_processor):
 
 def test_history_mcp_returns_all_records_with_compact_metadata(monkeypatch, console_processor):
     import asyncio
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     processor, _ = console_processor
-    start = datetime(2026, 10, 24, 0, 0)
+    start = datetime(2026, 10, 24, 0, 0, tzinfo=timezone.utc)
     measurements = {
         (start + timedelta(minutes=index)).isoformat(): float(index)
         for index in range(1205)
@@ -149,7 +169,8 @@ def test_history_mcp_returns_all_records_with_compact_metadata(monkeypatch, cons
 
     monkeypatch.setattr(processor.valueProvider, "getMethodValue", history)
     result = asyncio.run(processor.runtime.mcp.call_tool("get_history", {
-        "name": "hist_temp_garten", "date": "2026-10-24", "include_points": True,
+        "name": "hist_temp_garten", "start": "2026-10-24T00:00:00Z",
+        "end": "2026-10-25T00:00:00Z", "include_points": True,
     }))
     assert result.structuredContent["total_points"] == 1205
     assert result.structuredContent["sampled"] is False
@@ -161,10 +182,10 @@ def test_history_mcp_returns_all_records_with_compact_metadata(monkeypatch, cons
 
 
 def test_history_diagnostic_accepts_more_than_10000_complete_points(monkeypatch, console_processor):
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     processor, _ = console_processor
-    start = datetime(2026, 10, 24)
+    start = datetime(2026, 10, 24, tzinfo=timezone.utc)
     measurements = {
         (start + timedelta(seconds=index)).isoformat(): float(index)
         for index in range(10001)
@@ -177,7 +198,8 @@ def test_history_diagnostic_accepts_more_than_10000_complete_points(monkeypatch,
     result = invoke(
         processor, tool_name="get_history",
         arguments=json.dumps({
-            "name": "hist_temp_garten", "date": "2026-10-24", "include_points": True,
+            "name": "hist_temp_garten", "start": "2026-10-24T00:00:00Z",
+            "end": "2026-10-25T00:00:00Z", "include_points": True,
         }),
     )
     assert result["ok"], result.get("error")
@@ -261,15 +283,16 @@ def test_point_lookup_tool_requires_full_timestamp_and_returns_one_value(console
         processor, tool_name="get_historical_value",
         arguments=json.dumps({
             "name": "hist_temp_garten",
-            "date": "2026-10-20T14:30:00",
+            "date": "2026-10-20T14:30:00Z",
         }),
     )
     assert result["ok"], result
     structured = result["result"]
     assert isinstance(structured, dict), structured
-    assert "2026-10-20T14:30:00" in json.dumps(structured)
+    assert "2026-10-20T14:30:00Z" in json.dumps(structured)
 
-    for invalid in ["2026-10-20", "2026-10-20T14:30", "2026-10-20T99:30:00"]:
+    for invalid in ["2026-10-20", "2026-10-20T14:30", "2026-10-20T99:30:00Z",
+                    "2026-10-20T14:30:00"]:
         rejected = invoke(
             processor, tool_name="get_historical_value",
             arguments=json.dumps({"name": "hist_temp_garten", "date": invalid}),
@@ -281,10 +304,10 @@ def test_diagnostic_tools_use_structured_response_not_duplicate_text(console_pro
     processor, _ = console_processor
     for tool_name, arguments in [
         ("get_values", {"fields": ["temp_garten"]}),
-        ("get_history", {"name": "hist_temp_garten", "date": "2026-10-20",
-                         "days": 1, "include_points": True}),
+        ("get_history", {"name": "hist_temp_garten", "start": "2026-10-20T00:00:00Z",
+                         "end": "2026-10-21T00:00:00Z", "include_points": True}),
         ("get_historical_value", {"name": "hist_temp_garten",
-                                  "date": "2026-10-20T14:30:00"}),
+                                  "date": "2026-10-20T14:30:00Z"}),
     ]:
         result = invoke(
             processor, tool_name=tool_name,

@@ -37,9 +37,9 @@ The repository root `config/ai.json` defines an operational three-sensor DummyDa
 - **Keller:** 17.8 °C, synthetic trend of +0.03 °C per day, with 0.2 °C daily variation.
 - **Test action:** `set_temp_garten` changes only the simulated garden temperature, through the DummyData processor. No real hardware connection is configured.
 
-Use `get_values({"fields": ["temp_garten"]})`, `get_history({"name": "hist_temp_garten", "date": "2026-10-25", "days": 7, "include_points": true})` or `execute_action({"name": "set_temp_garten", "arguments": {"temp_garten": 23.5}})` from a connected MCP client. Action calls can also exercise cli-agent approvals without affecting real devices.
+Use `get_values({"fields": ["temp_garten"]})` or `execute_action({"name": "set_temp_garten", "arguments": {"temp_garten": 23.5}})` from a connected MCP client. Action calls can also exercise cli-agent approvals without affecting real devices.
 
-For `get_history({\"name\": \"hist_temp_garten\", \"date\": \"2026-10-25\", \"days\": 7, \"include_points\": true})`, there are 48 actual datetime-indexed samples per completed day and the partial current day, so the MCP results have meaningful ISO-8601 timestamps (without `time_inferred`). The MCP result contains **every** measurement, without sampling. With cli-agent and OS read access, the entire result is saved in a temporary session file; the LLM receives summary metadata including `workspace_path` and `records_path: "/points"` to process the data using Data MCP.
+The external Main plugin DummyData generates synthetic, timezone-naive histories. The new absolute-time MCP API deliberately rejects these ambiguous timestamps; to exercise `get_history` in the demo, use a provider returning timezone-aware measurement indices. With real persisted SignalDeck histories, the full result can be saved to a cli-agent session file with `workspace_path` and `records_path: "/points"` for Data MCP processing.
 
 While `signaldeck-plugin-main` [PR #7](https://github.com/signaldeck/signaldeck-plugin-main/pull/7) is under review, the demo Dockerfile and CI install its `feature/dummy-history-series` branch. **After that PR is merged**, switch the dependency back to the main release branch. These demo dependencies are not bundled in the AI plugin wheel.
 
@@ -311,28 +311,28 @@ names remain stable, which preserves cli-agent approval matching.
 
 ### Historical data
 
-The shared `PersistData.hist(date=target_day, days=0, fullDay=True)` fetches one
-individual day offset N, **not** an N-day window. For `mode=per_day`
-the new MCP processor calls the same ValueProvider method for each
-offset from 0 through N-1. Exact numeric count, min, max and mean are
-computed in Python; raw points can be optionally returned in full by the MCP
-tool, using cli-agent's metadata/file handoff to avoid a large LLM context.
-Individual history mappings can restrict
-the permitted `max_days`.
+The MCP tools require absolute ISO-8601 instants with an explicit UTC offset.
+For `mode=per_day`, the adapter queries the existing `PersistData.hist` once
+for every intersecting **UTC calendar day**, using aware UTC midnight,
+`days=0`, and `fullDay=True`. It deduplicates the returned points, then filters
+by the exact half-open interval. This works across midnight and DST changes,
+regardless of the datastore's configured timezone. Numeric statistics are
+computed over the filtered points; raw records can be returned using the
+cli-agent metadata/file handoff. Individual history mappings restrict elapsed
+duration via `max_days`.
 
-Use `mode=range` for exported methods that already support
-`date=YYYY-MM-DD` as the inclusive start date and `days=N` as the number of days from that date onward.
+For `mode=range`, an exported method receives aware UTC midnight as `date`
+and the number of intersecting UTC calendar days as `days`. It must return
+timestamped records; the adapter filters them into the exact requested window.
 
 History entries always use ISO 8601 date/time strings (for example,
 `2026-10-23T09:10:00+00:00`) rather than synthetic `day-0` labels.
-Actual timestamps from a Pandas Series or timestamp-indexed mapping are
-preserved, including timezone information. A date-only index becomes a
-midnight datetime with `time_inferred: true`. DummyData with `interval_minutes` configured now returns a **real Pandas
-DatetimeIndex with multiple synthetic values per day**, so those mock samples
-also carry proper timestamps and do not need `time_inferred`. Only legacy
-scalar mock histories lacking timestamps receive an approximate UTC timestamp
-and `time_inferred: true`. Those inferred timestamps are not measurement instants. Untimestamped multi-value sequences and scalar results in
-`mode=range` now fail clearly instead of manufacturing index labels.
+Actual timestamps from a Pandas Series or timestamp-indexed mapping retain
+their original UTC offsets. Naive, date-only, and inferred source timestamps
+are rejected: no server timezone is silently assigned to them. The external
+Main plugin's synthetic DummyData histories currently have naive timestamps
+and therefore cannot be queried through this strict absolute-time interface
+until that mock source supplies aware timestamps.
 
 
 ### Actions
@@ -581,85 +581,59 @@ This is an **initial implementation**, not an end-to-end-validated
 release. It still needs integration testing with a real SignalDeck
 instance, MCP server and cli-agent-api.
 
-### Date-based history calls
+### Absolute history windows
 
-`get_history` requires `date` in ISO calendar format (`YYYY-MM-DD`).
-`days` is now the number of days **starting on that explicit date**
-(default 1), not a relative offset from now. Example:
-
-```json
-{"name":"hist_temp_garten","date":"2026-10-20","days":2,"include_points":true}
-```
-
-This selects October 20 and October 21. Each selected day is dispatched
-through the existing SignalDeck `hist(date=<that day>, days=0,
-fullDay=True)` API: the underlying `days` argument is an offset, hence
-**must remain zero** to avoid accidentally selecting an earlier day.
-Optional `start_time` and `end_time` (`HH:MM` or `HH:MM:SS`, local clock time)
-select the **same time window on every day** in the requested range:
+`get_history` requires `start` and `end` as ISO-8601 timestamps with a
+`Z` or explicit numeric UTC offset. A date without a time or a naive local
+time is rejected. The start is inclusive and the end exclusive:
 
 ```json
-{"name":"hist_temp_garten","date":"2026-10-20","days":2,"start_time":"06:30","end_time":"10:30","include_points":true}
+{"name":"hist_temp_garten","start":"2026-10-20T06:30:00Z","end":"2026-10-22T10:30:00Z","include_points":true}
 ```
 
-The start is inclusive and the end is exclusive (`06:30 <= time < 10:30`).
-Either bound may be omitted to include the rest of that calendar day.
-Overnight windows, where the start is not earlier than the end, are rejected;
-use separate calls for windows crossing midnight. Filtering occurs after
-combining stored measurements with any eligible current-day cache, but
-**before** calculating statistics or returning points. The response
-echoes both optional time bounds; aggregate counts, extrema and mean apply
-only to the filtered samples. Time filtering requires real measurement
-timestamps, not inferred midnight timestamps for scalar daily values.
+This is one MCP call covering multiple UTC calendar days. It selects the
+same **absolute instants** as bounds written with different offsets, for example
+`2026-10-20T08:30:00+02:00` instead of `2026-10-20T06:30:00Z`.
+`max_days` limits the *elapsed duration*, not the number of underlying
+per-day datastore queries. Cross-midnight windows are supported, including
+windows spanning DST changes.
 
-Request validation rejects future or invalid calendar dates and respects
-the individual `max_days` limits. Scalar historical results are marked
-`time_inferred` with the requested calendar day rather than the current
-time. Previously saved requests containing only `days` need a `date`.
+The adapter reads each intersecting UTC day using aware UTC timestamps;
+it does not assume the datastore's timezone. Statistics and returned points
+refer only to `[start, end)`, with boundary duplicates removed and source
+offsets preserved. Naive measurement times are rejected rather than assigned
+an invented zone. Requests starting in the future are rejected.
+
+The former MCP parameters `date`, `days`, `start_time` and `end_time`
+have been removed. These were ambiguous for callers in other timezones.
 
 ### Point-in-time historical lookup
 
-Use `get_historical_value` when you need **one** historical value instead of
-all samples for a calendar day. The `date` parameter MUST contain both date
-and local time, including seconds: `YYYY-MM-DDTHH:MM:SS`. A date without a
-time or a timezone-offset string is rejected.
+Use `get_historical_value` when you need **one** historical value. Its
+`date` parameter also requires an explicit offset:
 
 ```json
-{"name": "pv_power_history", "date": "2026-10-20T14:30:00"}
+{"name":"pv_power_history","date":"2026-10-20T14:30:00+02:00"}
 ```
 
-This uses SignalDeck's existing `hist(date=..., days=0, fullDay=False)`.
-It returns the **best matching value chosen by the configured datastore**;
-it does not promise that the measurement was recorded at exactly 14:30:00.
-The response contains `requested_time`, `value`, the configured
-description and optional unit, not a full series or daily statistics.
+The equivalent UTC timestamp `2026-10-20T12:30:00Z` identifies exactly
+the same instant. The adapter passes an aware UTC datetime to SignalDeck's
+existing `hist(date=..., days=0, fullDay=False)`. The datastore returns
+its **best matching** historical value; this need not be a measurement at
+exactly the requested second. The result includes `requested_time`,
+`value`, description and optional unit. Only explicitly allowed per-day
+history methods can be used for point lookups.
 
-`get_history` still supports full calendar-day time series, including
-its explicit start date, optional multi-day window, points/statistics and
-today's optional cache merge. Both tools share the same explicit
-`mcp_data.data_rows` allowlist. Custom `mode="range"` history providers
-are not eligible for a single-value lookup.
+### In-memory measurements on recent windows
 
-The MCP diagnostic console shows only FastMCP's structured tool result,
-instead of also showing a second escaped JSON copy from its text blocks.
-The external MCP response consumed by cli-agent is not changed.
-
-### In-memory measurements on the current day
-
-For a requested date window that includes **today**, `get_history`
-queries both the normal persisted day (`hist(date=..., days=0,
-fullDay=True)`) and the in-memory measurement buffer using
-`hist(currentValues=True)`. Only actual timestamped samples for today's
-calendar date are merged; any matching timestamp is counted once, with
-the cache value taking precedence. All aggregate statistics and optional
-`points` are calculated **after** merging, without output sampling.
-For earlier days the cache is never requested.
-
-A processor without `cacheSize` (or with an empty cache) simply returns
-the persisted readings. Some synthetic/demo processors do not implement
-timestamped cache data; scalar responses from those processors are ignored
-for the optional merge. Neither `date` nor `days` of the normal daily
-history query is changed.
+For a recent interval, `get_history` may also request the in-memory
+`hist(currentValues=True)` buffer. Cache points are merged by absolute
+instant (so differing UTC offsets still identify the same measurement)
+and take precedence over persisted values at duplicate timestamps. The
+complete merged set is filtered to `[start, end)` before statistics and
+optional `points` are returned. Older intervals and custom range methods
+never query the live buffer. Missing or incompatible caches do not break
+persisted-history reads.
 
 
 ## Einklappbare Tool-Aktivitäten im AG-UI-Chat

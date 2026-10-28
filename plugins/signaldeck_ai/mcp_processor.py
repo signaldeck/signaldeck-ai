@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date as calendar_date, datetime, time, timedelta
+from datetime import datetime, time, timedelta, timezone
 from flask import request
 from jsonschema import ValidationError
 from threading import RLock
@@ -17,15 +17,30 @@ from .run_actions import RunActions
 from .serialization import bounded_sample, json_safe, merge_history_points, series_points, summarize_points
 
 
-_CLOCK_TIME_PATTERN = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\Z")
+_AWARE_TIMESTAMP_PATTERN = re.compile(
+    r"\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d"
+    r"(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)\Z"
+)
 
 
-def _parse_history_clock(value: str | None, parameter: str) -> time | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or _CLOCK_TIME_PATTERN.fullmatch(value) is None:
-        raise ValueError(f"{parameter} must be a local time in HH:MM or HH:MM:SS format")
-    return time.fromisoformat(value)
+def _parse_instant(value: str, parameter: str) -> datetime:
+    """Require an unambiguous RFC 3339 instant; never assume the server timezone."""
+    if not isinstance(value, str) or _AWARE_TIMESTAMP_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"{parameter} must be an ISO 8601 timestamp with Z or an explicit UTC offset")
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{parameter} must be a valid timezone-aware timestamp") from exc
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError(f"{parameter} must include a UTC offset")
+    return instant.astimezone(timezone.utc)
+
+
+def _point_instant(point: dict[str, Any]) -> datetime:
+    if point.get("time_inferred"):
+        raise ValueError("Absolute history windows require actual measurement timestamps")
+    # The server may return different offsets on opposite sides of a DST change.
+    return _parse_instant(point["time"], "History measurement time")
 
 
 class MCPDisplayData(DisplayData):
@@ -200,72 +215,60 @@ class MCPServerProcessor(DisplayProcessor):
             return result
 
     def read_history(
-        self, name: str, *, date: str, days: int = 1,
-        start_time: str | None = None, end_time: str | None = None,
+        self, name: str, *, start: str, end: str,
         include_points: bool = False, max_points: int | None = 200,
     ) -> dict[str, Any]:
-        """Read a date-anchored span, starting on the requested calendar day.
+        """Read the absolute half-open interval [start, end), irrespective of server TZ.
 
-        PersistData.hist subtracts `days` from `date`: consequently each
-        individual day must be queried with days=0 and fullDay=True.
-        The days parameter of *this* method is instead a window length.
+        PersistData.hist supports full UTC calendar days when passed aware UTC
+        midnights. Query the intersecting days, then filter exact instants.
         """
         if name not in self.history_specs:
             raise ValueError("Unknown or unauthorized data row")
         spec = self.history_specs[name]
-        if not isinstance(date, str) or len(date) != 10:
-            raise ValueError("date must be a calendar date in YYYY-MM-DD format")
-        try:
-            target_day = calendar_date.fromisoformat(date)
-        except ValueError as exc:
-            raise ValueError("date must be a valid calendar date in YYYY-MM-DD format") from exc
-        if target_day.isoformat() != date:
-            raise ValueError("date must be a calendar date in YYYY-MM-DD format")
-        if type(days) is not int or not 1 <= days <= spec.get("max_days", 30):
-            raise ValueError("Requested history range is not permitted")
+        start_utc = _parse_instant(start, "start")
+        end_utc = _parse_instant(end, "end")
+        if end_utc <= start_utc:
+            raise ValueError("end must be after start")
+        if end_utc - start_utc > timedelta(days=spec.get("max_days", 30)):
+            raise ValueError("Requested history range exceeds max_days")
+        now_utc = datetime.now(timezone.utc)
+        if start_utc > now_utc:
+            raise ValueError("Future history starts are not permitted")
         if max_points is not None and (type(max_points) is not int or not 1 <= max_points <= 1000):
             raise ValueError("max_points must be between 1 and 1000")
-        start_clock = _parse_history_clock(start_time, "start_time")
-        end_clock = _parse_history_clock(end_time, "end_time")
-        if (start_clock or time.min) >= (end_clock or time.max):
-            raise ValueError("start_time must be earlier than end_time within each day")
-        try:
-            end_day = target_day + timedelta(days=days - 1)
-        except OverflowError as exc:
-            raise ValueError("Requested history range is outside valid dates") from exc
-        # No day in the requested interval may lie in the future.
-        if end_day > datetime.now().date():
-            raise ValueError("Future history dates are not permitted")
+        first_day = start_utc.date()
+        last_day = (end_utc - timedelta(microseconds=1)).date()
+        day_count = (last_day - first_day).days + 1
 
         binding = self._method_bindings[name]
         provider_method = binding["from"]
         with self._read_lock:
             points = []
             if spec.get("mode", "per_day") == "range":
-                # Custom range methods (unlike PersistData.hist) must accept
-                # the explicit inclusive start date and window length, and
-                # return timestamped records. They never receive an offset.
+                # Custom range methods accept a timezone-aware UTC start date
+                # and count of UTC days; the requested bounds are filtered below.
                 result = self.valueProvider.getMethodValue(
                     provider_method,
-                    date=datetime.combine(target_day, time.min), days=days,
+                    date=datetime.combine(first_day, time.min, tzinfo=timezone.utc),
+                    days=day_count,
                 )
                 points.extend(series_points(result, day=0, allow_scalar=False))
             else:
-                for offset in range(days):
-                    requested_day = target_day + timedelta(days=offset)
+                for offset in range(day_count):
+                    requested_day = first_day + timedelta(days=offset)
                     result = self.valueProvider.getMethodValue(
                         provider_method,
-                        date=datetime.combine(requested_day, time.min),
+                        date=datetime.combine(requested_day, time.min, tzinfo=timezone.utc),
                         days=0, fullDay=True,
                     )
-                    points.extend(series_points(
-                        result, day=0, sample_date=requested_day,
-                    ))
+                    points.extend(series_points(result, day=0, allow_scalar=False))
 
-            # Only the current calendar day can contain measurements that
-            # have not yet reached the persistent store. PersistData.hist
-            # exposes its in-memory deque via currentValues=True.
-            if spec.get("mode", "per_day") == "per_day" and target_day <= datetime.now().date() <= end_day:
+            # Read the live buffer for recent windows. Filter by absolute
+            # timestamps, so cached samples in a different local calendar day
+            # cannot contaminate the result.
+            if (spec.get("mode", "per_day") == "per_day"
+                    and end_utc > now_utc - timedelta(days=1)):
                 try:
                     cached = self.valueProvider.getMethodValue(
                         provider_method, currentValues=True,
@@ -273,6 +276,11 @@ class MCPServerProcessor(DisplayProcessor):
                     cache_points = series_points(
                         cached, day=0, allow_scalar=False,
                     )
+                    # The optional cache must never invalidate otherwise
+                    # usable persisted history. Validate every cached instant
+                    # here, even if that sample is outside the requested range.
+                    for point in cache_points:
+                        _point_instant(point)
                 except (ValueError, TypeError, KeyError, AttributeError) as exc:
                     # Optional cache support must not break a valid persistent
                     # history read (e.g. DummyData returns a scalar).
@@ -281,37 +289,18 @@ class MCPServerProcessor(DisplayProcessor):
                         name, exc,
                     )
                 else:
-                    today = datetime.now().date()
-                    cache_points = [
-                        point for point in cache_points
-                        if datetime.fromisoformat(point["time"]).date() == today
-                    ]
                     points = merge_history_points(points, cache_points)
 
-        # Keep source measurement timestamps unchanged. Scalar values without
-        # timestamps are explicitly marked as inferred at the requested date.
-        points.sort(key=lambda row: row["time"])
-        if start_clock is not None or end_clock is not None:
-            if any(point.get("time_inferred") for point in points):
-                raise ValueError("Time-of-day filtering requires actual measurement timestamps")
-            filtered = []
-            for point in points:
-                stamp = datetime.fromisoformat(point["time"])
-                clock = stamp.time().replace(tzinfo=None)
-                if (target_day <= stamp.date() <= end_day
-                        and (start_clock is None or clock >= start_clock)
-                        and (end_clock is None or clock < end_clock)):
-                    filtered.append(point)
-            points = filtered
+        # Deduplicate inclusive UTC day boundaries, retain source offsets and
+        # order by actual instants (lexicographic ISO order fails at DST fall-back).
+        points = merge_history_points(points, [])
+        points = [point for point in points if start_utc <= _point_instant(point) < end_utc]
+        points.sort(key=_point_instant)
         output = {
             "name": name,
             "description": spec["description"],
-            "date": date,
-            "start_date": date,
-            "end_date": end_day.isoformat(),
-            "days": days,
-            "start_time": start_time,
-            "end_time": end_time,
+            "start": start,
+            "end": end,
             "statistics": summarize_points(points),
         }
         if "unit" in spec:
@@ -325,7 +314,7 @@ class MCPServerProcessor(DisplayProcessor):
         return output
 
     def read_historical_value(self, name: str, *, date: str) -> dict[str, Any]:
-        """Look up one historical value at a required local date AND time.
+        """Look up one historical value at a timezone-aware instant.
 
         PersistData.hist(fullDay=False) selects the datastore's best
         historical value for the supplied instant; it does not guarantee
@@ -336,15 +325,8 @@ class MCPServerProcessor(DisplayProcessor):
         spec = self.history_specs[name]
         if spec.get("mode", "per_day") != "per_day":
             raise ValueError("Point-in-time lookup requires a per-day history method")
-        if not isinstance(date, str) or len(date) != 19:
-            raise ValueError("date must include a time in YYYY-MM-DDTHH:MM:SS format")
-        try:
-            requested = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S")
-        except ValueError as exc:
-            raise ValueError("date must include a valid time in YYYY-MM-DDTHH:MM:SS format") from exc
-        if requested.strftime("%Y-%m-%dT%H:%M:%S") != date:
-            raise ValueError("date must include a valid time in YYYY-MM-DDTHH:MM:SS format")
-        if requested > datetime.now():
+        requested = _parse_instant(date, "date")
+        if requested > datetime.now(timezone.utc):
             raise ValueError("Future history dates are not permitted")
 
         provider_method = self._method_bindings[name]["from"]
@@ -390,8 +372,9 @@ class MCPServerProcessor(DisplayProcessor):
                 keys = list(self.history_specs)
                 tool["example_args"] = (
                     {"name": keys[0],
-                     "date": (datetime.now() - timedelta(days=1)).date().isoformat(),
-                     "days": 2, "include_points": True}
+                     "start": (datetime.now(timezone.utc) - timedelta(hours=2)).replace(microsecond=0).isoformat(),
+                     "end": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                     "include_points": True}
                     if keys else {}
                 )
             elif name == "run":

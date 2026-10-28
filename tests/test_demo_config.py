@@ -1,6 +1,6 @@
 """Integration tests: real main-plugin DummyData -> SDK ValueProvider -> MCP."""
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -43,21 +43,21 @@ def test_real_dummy_data_exports_and_selected_values(demo):
     }
 
 
-def test_dummy_historical_temperature_is_synthetic(demo):
+def test_dummy_history_without_timezone_is_rejected_as_ambiguous(demo):
     dummy, mcp, provider, _ = demo
-    history = mcp.read_history("hist_temp_garten", date=(datetime.now() - timedelta(days=6)).date().isoformat(), days=7, include_points=True)
-    assert 6 * 48 <= history["statistics"]["count"] <= 7 * 48
-    assert len(history["points"]) == 200  # bounded default sample
-    assert history["sampled"] is True
-    assert history["total_points"] == history["statistics"]["count"]
-    assert history["statistics"]["minimum"] < history["statistics"]["maximum"]
-    assert all(datetime.fromisoformat(point["time"]) for point in history["points"])
-    assert all("time_inferred" not in point for point in history["points"])
-    assert all(not point["time"].startswith("day-") for point in history["points"])
-    assert len({point["time"][:10] for point in history["points"]}) >= 6
-    assert 48 <= mcp.read_history("hist_temp_wohnzimmer", date=(datetime.now() - timedelta(days=1)).date().isoformat(), days=2)["statistics"]["count"] <= 96
+    today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # The external Main plugin's DummyData intentionally emits naive wall
+    # times. The absolute MCP contract cannot label those as actual instants.
+    with pytest.raises(ValueError, match="offset"):
+        mcp.read_history(
+            "hist_temp_garten", start=(today - timedelta(days=6)).isoformat(),
+            end=(today + timedelta(days=1)).isoformat(), include_points=True,
+        )
     with pytest.raises(ValueError):
-        mcp.read_history("unknown_method", date=datetime.now().date().isoformat(), days=1)
+        mcp.read_history(
+            "unknown_method", start=today.isoformat(),
+            end=(today + timedelta(days=1)).isoformat(),
+        )
 
 
 def test_mock_write_changes_only_dummy_temperature(demo):
