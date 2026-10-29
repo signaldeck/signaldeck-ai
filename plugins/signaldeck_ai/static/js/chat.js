@@ -354,16 +354,25 @@
           case "TEXT_MESSAGE_END":
             flushMarkdown();
             break;
-          case "CUSTOM":
-            if (evt.name === "artifact_published" && evt.value) {
-              renderDownload(evt.value);
-            }
-            break;
+
           case "TOOL_CALL_START":
             liveToolStart(runId, evt.toolCallId, evt.toolCallName);
             break;
           case "TOOL_CALL_RESULT":
-            liveToolStatus(evt.toolCallId, evt.content);
+            if (Array.isArray(evt.content)) {
+              for (const part of evt.content) {
+                if (part?.type === "document" && part.metadata?.artifactId) {
+                  renderDownload({
+                    id: part.metadata.artifactId,
+                    filename: part.metadata.filename,
+                    mimeType: part.source?.mimeType,
+                  });
+                }
+              }
+              liveToolStatus(evt.toolCallId, "success");
+            } else {
+              liveToolStatus(evt.toolCallId, evt.content);
+            }
             break;
           case "RUN_ERROR":
             render("info", "Agent-Fehler: " + (evt.message || "unbekannt"));
