@@ -408,19 +408,33 @@ class ChatRuntime:
             with self._lock:
                 if not connection.revoked and connection.current_run == run.run_id:
                     self._record_tool_activity(connection, run, event)
-                    if event.get("type") == "CUSTOM" and event.get("name") == "artifact_published":
-                        value = event.get("value")
-                        if isinstance(value, dict):
-                            identifier = value.get("id")
-                            filename = value.get("filename")
-                            mime_type = value.get("mimeType")
-                            if (isinstance(identifier, str) and len(identifier) == 32
-                                    and isinstance(filename, str) and 0 < len(filename) <= 128
-                                    and isinstance(mime_type, str) and len(mime_type) <= 100):
-                                connection.display_messages.append({
-                                    "role": "download", "id": identifier,
-                                    "filename": filename, "mimeType": mime_type,
-                                })
+                    if event.get("type") == "TOOL_CALL_RESULT":
+                        parts = event.get("content")
+                        if isinstance(parts, list):
+                            for part in parts:
+                                if not isinstance(part, dict) or part.get("type") != "document":
+                                    continue
+                                source = part.get("source")
+                                metadata = part.get("metadata")
+                                if not isinstance(source, dict) or not isinstance(metadata, dict):
+                                    continue
+                                identifier = metadata.get("artifactId")
+                                filename = metadata.get("filename")
+                                mime_type = source.get("mimeType")
+                                expected_url = (
+                                    "/threads/" + connection.thread_id + "/artifacts/" + identifier
+                                    if isinstance(identifier, str) else ""
+                                )
+                                if (isinstance(identifier, str) and len(identifier) == 32
+                                        and all(ch in "0123456789abcdef" for ch in identifier)
+                                        and source.get("type") == "url"
+                                        and source.get("value") == expected_url
+                                        and isinstance(filename, str) and 0 < len(filename) <= 128
+                                        and isinstance(mime_type, str) and len(mime_type) <= 100):
+                                    connection.display_messages.append({
+                                        "role": "download", "id": identifier,
+                                        "filename": filename, "mimeType": mime_type,
+                                    })
             run.emit(event)
         except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
             raise ChatActionError("Ungültiges AG-UI-Event.") from exc
