@@ -141,6 +141,11 @@ class ChatRuntime:
                         "role": "tools", "id": msg["id"],
                         "tools": [dict(tool) for tool in msg["tools"]],
                     })
+                elif msg["role"] == "download":
+                    messages.append({
+                        "role": "download", "id": msg["id"],
+                        "filename": msg["filename"], "mimeType": msg["mimeType"],
+                    })
                 else:
                     messages.append({"role": msg["role"], "content": msg["content"]})
             current = connection.runs.get(connection.current_run)
@@ -275,6 +280,12 @@ class ChatRuntime:
                 raise ChatActionError("Zunächst die ausstehende Tool-Freigabe beantworten.")
             if len(connection.messages) >= MAX_HISTORY_MESSAGES:
                 raise ChatActionError("Chat-History-Limit erreicht. Bitte neuen Chat starten.")
+            # The preceding question's artifacts expire when a new one starts.
+            # Do not leave stale download controls in the visible transcript.
+            connection.display_messages[:] = [
+                item for item in connection.display_messages
+                if item.get("role") != "download"
+            ]
             connection.messages.append({
                 "id": uuid.uuid4().hex,
                 "role": "user",
@@ -403,6 +414,33 @@ class ChatRuntime:
             with self._lock:
                 if not connection.revoked and connection.current_run == run.run_id:
                     self._record_tool_activity(connection, run, event)
+                    if event.get("type") == "TOOL_CALL_RESULT":
+                        parts = event.get("content")
+                        if isinstance(parts, list):
+                            for part in parts:
+                                if not isinstance(part, dict) or part.get("type") != "document":
+                                    continue
+                                source = part.get("source")
+                                metadata = part.get("metadata")
+                                if not isinstance(source, dict) or not isinstance(metadata, dict):
+                                    continue
+                                identifier = metadata.get("artifactId")
+                                filename = metadata.get("filename")
+                                mime_type = source.get("mimeType")
+                                expected_url = (
+                                    "/threads/" + connection.thread_id + "/artifacts/" + identifier
+                                    if isinstance(identifier, str) else ""
+                                )
+                                if (isinstance(identifier, str) and len(identifier) == 32
+                                        and all(ch in "0123456789abcdef" for ch in identifier)
+                                        and source.get("type") == "url"
+                                        and source.get("value") == expected_url
+                                        and isinstance(filename, str) and 0 < len(filename) <= 128
+                                        and isinstance(mime_type, str) and len(mime_type) <= 100):
+                                    connection.display_messages.append({
+                                        "role": "download", "id": identifier,
+                                        "filename": filename, "mimeType": mime_type,
+                                    })
             run.emit(event)
         except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
             raise ChatActionError("Ungültiges AG-UI-Event.") from exc
@@ -446,7 +484,7 @@ class ChatRuntime:
             if tool is not None:
                 status = event.get("content")
                 tool["status"] = (
-                    status if status in {"success", "error", "denied", "finished"}
+                    status if isinstance(status, str) and status in {"success", "error", "denied", "finished"}
                     else "finished"
                 )
         elif kind == "RUN_FINISHED":
@@ -474,6 +512,34 @@ class ChatRuntime:
                     for tool in group["tools"]:
                         if tool["status"] == "running":
                             tool["status"] = "error"
+
+    def download_artifact(self, identifier: str, artifact_id: str) -> tuple[bytes, str, str]:
+        """Proxy a published cli-agent artifact using the server-side credential."""
+        if not isinstance(artifact_id, str) or len(artifact_id) != 32 or not all(
+            ch in "0123456789abcdef" for ch in artifact_id
+        ):
+            raise ChatActionError("Ungültige Download-ID.")
+        with self._lock:
+            connection = self._connection_locked(identifier)
+            token, thread_id = connection.token, connection.thread_id
+            published = next((
+                msg for msg in connection.display_messages
+                if msg.get("role") == "download" and msg.get("id") == artifact_id
+            ), None)
+            if published is None:
+                raise ChatActionError("Download ist nicht für diese Konversation freigegeben.")
+            filename = published["filename"]
+            mime_type = published["mimeType"]
+        url = self.endpoint.removesuffix("/ag-ui") + (
+            "/threads/" + thread_id + "/artifacts/" + artifact_id
+        )
+        with self._client_factory(timeout=30.0) as client:
+            response = client.get(url, headers=self._headers(token))
+            if response.status_code != 200:
+                raise ChatActionError("Download nicht mehr verfügbar.")
+            if len(response.content) > 20_000_000:
+                raise ChatActionError("Download zu groß.")
+            return response.content, filename, mime_type
 
     def get_run(self, identifier: str, run_id: str) -> AgentRun:
         with self._lock:

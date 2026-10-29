@@ -24,6 +24,8 @@
     let markdownFrame = null;
     // Tool entries are display-only. They never contain arguments or results.
     const toolGroups = new Map();
+    // Suppress obsolete download IDs even if an earlier state poll finishes late.
+    const expiredDownloadIds = new Set();
     const statusText = {
       running: "Läuft", success: "Erfolgreich", error: "Fehler",
       denied: "Abgelehnt", approval: "Freigabe erforderlich",
@@ -144,6 +146,53 @@
       }
     }
 
+    function renderDownload(item) {
+      if (!item || !/^[a-f0-9]{32}$/.test(item.id || "") ||
+          expiredDownloadIds.has(item.id)) return;
+      const row = document.createElement("div");
+      row.className = "sdai-message sdai-download";
+      row.dataset.artifactId = item.id;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "sdai-download-button";
+      button.textContent = "Datei herunterladen: " + (item.filename || "Export");
+      button.addEventListener("click", async () => {
+        if (!connectionId) return;
+        button.disabled = true;
+        try {
+          const response = await fetch(
+            base + "/download/" + encodeURIComponent(item.id),
+            {method: "GET", credentials: "same-origin",
+             headers: {"X-SignalDeck-AI-Connection": connectionId}}
+          );
+          if (!response.ok) throw new Error("Download nicht mehr verfügbar");
+          const blob = await response.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = objectUrl;
+          link.download = item.filename || "export";
+          link.click();
+          window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        } catch (error) {
+          render("info", String(error.message || error));
+        } finally {
+          button.disabled = false;
+        }
+      });
+      row.appendChild(button);
+      transcript.appendChild(row);
+      return row;
+    }
+
+    function expirePreviousDownloads() {
+      for (const row of transcript.querySelectorAll(".sdai-download")) {
+        if (row.dataset.artifactId) expiredDownloadIds.add(row.dataset.artifactId);
+        row.remove();
+      }
+      // The next successful state refresh must rebuild from server state.
+      lastMessages = null;
+    }
+
     function render(role, value) {
       const node = document.createElement("div");
       node.className = "sdai-message sdai-" + role;
@@ -198,6 +247,7 @@
         const messages = state.messages || [];
         const serialized = JSON.stringify(messages);
         if (serialized !== lastMessages || previousConnection !== connectionId) {
+          if (previousConnection !== connectionId) expiredDownloadIds.clear();
           const openGroups = new Set(
             Array.from(toolGroups.entries())
               .filter(([, group]) => group.details.open)
@@ -205,7 +255,9 @@
           );
           clearTranscript();
           for (const msg of messages) {
-            if (msg.role === "tools") {
+            if (msg.role === "download") {
+              renderDownload(msg);
+            } else if (msg.role === "tools") {
               const group = renderToolGroup(msg);
               if (group && openGroups.has(msg.id)) group.open = true;
             } else if (msg.role === "user" || msg.role === "assistant") {
@@ -239,6 +291,7 @@
           connectionId = null;
           interrupt = null;
           clearTranscript();
+          expiredDownloadIds.clear();
           lastMessages = null;
           approvals.hidden = true;
         } else {
@@ -274,6 +327,7 @@
         interrupt = null;
         approvals.hidden = true;
         clearTranscript();
+        expiredDownloadIds.clear();
         lastMessages = null;
       } catch (err) {
         render("info", "Verlauf zurücksetzen: " + String(err.message || err));
@@ -316,11 +370,25 @@
           case "TEXT_MESSAGE_END":
             flushMarkdown();
             break;
+
           case "TOOL_CALL_START":
             liveToolStart(runId, evt.toolCallId, evt.toolCallName);
             break;
           case "TOOL_CALL_RESULT":
-            liveToolStatus(evt.toolCallId, evt.content);
+            if (Array.isArray(evt.content)) {
+              for (const part of evt.content) {
+                if (part?.type === "document" && part.metadata?.artifactId) {
+                  renderDownload({
+                    id: part.metadata.artifactId,
+                    filename: part.metadata.filename,
+                    mimeType: part.source?.mimeType,
+                  });
+                }
+              }
+              liveToolStatus(evt.toolCallId, "success");
+            } else {
+              liveToolStatus(evt.toolCallId, evt.content);
+            }
             break;
           case "RUN_ERROR":
             render("info", "Agent-Fehler: " + (evt.message || "unbekannt"));
@@ -370,6 +438,9 @@
       updateUI();
       try {
         const result = await action(name, args);
+        // Only a *new, accepted* user question invalidates previous artifacts.
+        // Resume/approval calls must retain downloads from the current question.
+        if (name === "send") expirePreviousDownloads();
         await listen(result.run_id);
       } catch (err) {
         render("info", "Agentenlauf: " + String(err.message || err));

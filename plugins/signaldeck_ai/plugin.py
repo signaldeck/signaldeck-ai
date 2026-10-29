@@ -73,6 +73,32 @@ def stream_events(name: str, run_id: str):
     )
 
 
+@bp.get("/api/chat/<name>/download/<artifact_id>")
+def download_artifact(name: str, artifact_id: str):
+    """Same-origin, authenticated proxy to cli-agent's localhost file endpoint."""
+    from flask import current_app, send_file
+    from io import BytesIO
+    processor = current_app.extensions["signaldeck.ai.processors"].get(name)
+    if not isinstance(processor, AGUIChatProcessor):
+        abort(404)
+    connection_id = request.headers.get("X-SignalDeck-AI-Connection", "")
+    if not connection_id:
+        abort(401)
+    try:
+        payload, filename, mime_type = processor.runtime.download_artifact(
+            connection_id, artifact_id,
+        )
+    except ChatActionError:
+        abort(404)
+    response = send_file(
+        BytesIO(payload), mimetype=mime_type,
+        as_attachment=True, download_name=filename,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 def register(app, ctx=None):
     if "signaldeck.ai.processors" in app.extensions:
         return

@@ -37,3 +37,7 @@
 .sdai-tool-entry{display:flex;align-items:baseline;justify-content:space-between;gap:12px;border-top:1px solid #9993;padding:6px 0 0;min-width:0}
 .sdai-tool-name{overflow-wrap:anywhere;min-width:0;font-family:monospace}
 .sdai-tool-status{white-space:nowrap;color:var(--text-muted,#777)}
+
+.sdai-download { padding: 0.5rem 0; }
+.sdai-download-button { cursor: pointer; padding: .55rem .8rem; border-radius: .4rem; }
+.sdai-download-button:disabled { opacity: .55; cursor: wait; }
