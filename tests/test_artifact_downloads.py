@@ -17,6 +17,10 @@ def test_document_result_is_persisted_only_for_current_thread():
     connection.runs[run.run_id] = run
 
     artifact_id = "a" * 32
+    runtime._receive_frame(connection, run, [json.dumps({
+        "type": "TOOL_CALL_START", "toolCallId": "call-1",
+        "toolCallName": "agent__publish_artifact",
+    })])
     event = {
         "type": "TOOL_CALL_RESULT",
         "toolCallId": "call-1",
@@ -31,14 +35,14 @@ def test_document_result_is_persisted_only_for_current_thread():
         ],
     }
     runtime._receive_frame(connection, run, [json.dumps(event)])
-    assert connection.display_messages == [
+    assert [msg for msg in connection.display_messages if msg["role"] == "download"] == [
         {"role": "download", "id": artifact_id,
          "filename": "export.csv", "mimeType": "text/csv"}
     ]
 
     event["content"][1]["source"]["value"] = "/threads/other/artifacts/" + artifact_id
     runtime._receive_frame(connection, run, [json.dumps(event)])
-    assert len(connection.display_messages) == 1
+    assert len([msg for msg in connection.display_messages if msg["role"] == "download"]) == 1
 
 
 def test_flask_proxy_requires_connection_and_sends_attachment():
