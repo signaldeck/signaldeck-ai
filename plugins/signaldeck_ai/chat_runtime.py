@@ -484,7 +484,7 @@ class ChatRuntime:
             if tool is not None:
                 status = event.get("content")
                 tool["status"] = (
-                    status if status in {"success", "error", "denied", "finished"}
+                    status if isinstance(status, str) and status in {"success", "error", "denied", "finished"}
                     else "finished"
                 )
         elif kind == "RUN_FINISHED":
