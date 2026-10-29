@@ -24,6 +24,8 @@
     let markdownFrame = null;
     // Tool entries are display-only. They never contain arguments or results.
     const toolGroups = new Map();
+    // Suppress obsolete download IDs even if an earlier state poll finishes late.
+    const expiredDownloadIds = new Set();
     const statusText = {
       running: "Läuft", success: "Erfolgreich", error: "Fehler",
       denied: "Abgelehnt", approval: "Freigabe erforderlich",
@@ -145,9 +147,11 @@
     }
 
     function renderDownload(item) {
-      if (!item || !/^[a-f0-9]{32}$/.test(item.id || "")) return;
+      if (!item || !/^[a-f0-9]{32}$/.test(item.id || "") ||
+          expiredDownloadIds.has(item.id)) return;
       const row = document.createElement("div");
       row.className = "sdai-message sdai-download";
+      row.dataset.artifactId = item.id;
       const button = document.createElement("button");
       button.type = "button";
       button.className = "sdai-download-button";
@@ -178,6 +182,15 @@
       row.appendChild(button);
       transcript.appendChild(row);
       return row;
+    }
+
+    function expirePreviousDownloads() {
+      for (const row of transcript.querySelectorAll(".sdai-download")) {
+        if (row.dataset.artifactId) expiredDownloadIds.add(row.dataset.artifactId);
+        row.remove();
+      }
+      // The next successful state refresh must rebuild from server state.
+      lastMessages = null;
     }
 
     function render(role, value) {
@@ -234,6 +247,7 @@
         const messages = state.messages || [];
         const serialized = JSON.stringify(messages);
         if (serialized !== lastMessages || previousConnection !== connectionId) {
+          if (previousConnection !== connectionId) expiredDownloadIds.clear();
           const openGroups = new Set(
             Array.from(toolGroups.entries())
               .filter(([, group]) => group.details.open)
@@ -277,6 +291,7 @@
           connectionId = null;
           interrupt = null;
           clearTranscript();
+          expiredDownloadIds.clear();
           lastMessages = null;
           approvals.hidden = true;
         } else {
@@ -312,6 +327,7 @@
         interrupt = null;
         approvals.hidden = true;
         clearTranscript();
+        expiredDownloadIds.clear();
         lastMessages = null;
       } catch (err) {
         render("info", "Verlauf zurücksetzen: " + String(err.message || err));
@@ -422,6 +438,9 @@
       updateUI();
       try {
         const result = await action(name, args);
+        // Only a *new, accepted* user question invalidates previous artifacts.
+        // Resume/approval calls must retain downloads from the current question.
+        if (name === "send") expirePreviousDownloads();
         await listen(result.run_id);
       } catch (err) {
         render("info", "Agentenlauf: " + String(err.message || err));
