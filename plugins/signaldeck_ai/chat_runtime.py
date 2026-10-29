@@ -280,6 +280,12 @@ class ChatRuntime:
                 raise ChatActionError("Zunächst die ausstehende Tool-Freigabe beantworten.")
             if len(connection.messages) >= MAX_HISTORY_MESSAGES:
                 raise ChatActionError("Chat-History-Limit erreicht. Bitte neuen Chat starten.")
+            # The preceding question's artifacts expire when a new one starts.
+            # Do not leave stale download controls in the visible transcript.
+            connection.display_messages[:] = [
+                item for item in connection.display_messages
+                if item.get("role") != "download"
+            ]
             connection.messages.append({
                 "id": uuid.uuid4().hex,
                 "role": "user",
