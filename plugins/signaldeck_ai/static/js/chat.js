@@ -144,6 +144,42 @@
       }
     }
 
+    function renderDownload(item) {
+      if (!item || !/^[a-f0-9]{32}$/.test(item.id || "")) return;
+      const row = document.createElement("div");
+      row.className = "sdai-message sdai-download";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "sdai-download-button";
+      button.textContent = "Datei herunterladen: " + (item.filename || "Export");
+      button.addEventListener("click", async () => {
+        if (!connectionId) return;
+        button.disabled = true;
+        try {
+          const response = await fetch(
+            base + "/download/" + encodeURIComponent(item.id),
+            {method: "GET", credentials: "same-origin",
+             headers: {"X-SignalDeck-AI-Connection": connectionId}}
+          );
+          if (!response.ok) throw new Error("Download nicht mehr verfügbar");
+          const blob = await response.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = objectUrl;
+          link.download = item.filename || "export";
+          link.click();
+          window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        } catch (error) {
+          render("info", String(error.message || error));
+        } finally {
+          button.disabled = false;
+        }
+      });
+      row.appendChild(button);
+      transcript.appendChild(row);
+      return row;
+    }
+
     function render(role, value) {
       const node = document.createElement("div");
       node.className = "sdai-message sdai-" + role;
@@ -205,7 +241,9 @@
           );
           clearTranscript();
           for (const msg of messages) {
-            if (msg.role === "tools") {
+            if (msg.role === "download") {
+              renderDownload(msg);
+            } else if (msg.role === "tools") {
               const group = renderToolGroup(msg);
               if (group && openGroups.has(msg.id)) group.open = true;
             } else if (msg.role === "user" || msg.role === "assistant") {
@@ -315,6 +353,11 @@
           }
           case "TEXT_MESSAGE_END":
             flushMarkdown();
+            break;
+          case "CUSTOM":
+            if (evt.name === "artifact_published" && evt.value) {
+              renderDownload(evt.value);
+            }
             break;
           case "TOOL_CALL_START":
             liveToolStart(runId, evt.toolCallId, evt.toolCallName);
